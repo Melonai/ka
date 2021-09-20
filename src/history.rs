@@ -1,6 +1,11 @@
-use std::{fs::File, io::{self, Read, Seek, Write}};
+use std::{
+    fs::File,
+    io::{Read, Seek, Write},
+};
 
 use serde::{Deserialize, Serialize};
+
+use anyhow::{Context, Result};
 
 use crate::text_diff::TextChange;
 
@@ -11,13 +16,13 @@ pub struct FileHistory {
 }
 
 impl FileHistory {
-    pub fn from_file(file: &mut File) -> Result<FileHistory, ()> {
+    pub fn from_file(file: &mut File) -> Result<FileHistory> {
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer)
-            .expect("Could not read file history,");
+            .context("Failed reading file history.")?;
 
         let file_history = serde_json::from_slice::<FileHistory>(&buffer);
-        Ok(file_history.expect("Corrupted file history."))
+        Ok(file_history.context("Corrupted file history.")?)
     }
 
     pub fn cursor(&self) -> usize {
@@ -48,8 +53,8 @@ impl FileHistory {
         buffer
     }
 
-    pub fn write_to_file(&self, file: &mut File) -> io::Result<()> {
-        let encoded: Vec<u8> = serde_json::to_vec(self).unwrap();
+    pub fn write_to_file(&self, file: &mut File) -> anyhow::Result<()> {
+        let encoded: Vec<u8> = serde_json::to_vec(self)?;
         file.rewind()?;
         file.set_len(0)?;
         file.write_all(encoded.as_ref())?;

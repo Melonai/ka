@@ -10,18 +10,18 @@ fn main() {
 
     match command {
         "create" => {
-            create(options).unwrap();
+            create(options).expect("Failed executing Create action.");
         }
         "update" => {
-            update(options).unwrap();
+            update(options).expect("Failed executing Update action.");
         }
         "shift" => {
             let file_path = args[2].as_str();
 
             let new_cursor: usize = args[3].as_str().parse().expect("Invalid cursor.");
 
-            shift(options, file_path, new_cursor).unwrap();
+            shift(options, file_path, new_cursor).expect("Failed executing Shift actions.");
         }
-        _ => println!("Unknown command: {}", command),
+        _ => panic!("Unknown command: {}", command),
     }
 }

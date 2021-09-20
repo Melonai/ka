@@ -4,6 +4,7 @@ mod update;
 
 use std::path::{Path, PathBuf};
 
+use anyhow::Result;
 pub use create::create;
 pub use shift::shift;
 pub use update::update;
@@ -19,12 +20,8 @@ impl ActionOptions {
         }
     }
 
-    pub fn from_pwd() -> Result<Self, ()> {
-        let current_path = std::env::current_dir();
-        if let Ok(repository_path) = current_path {
-            Ok(ActionOptions { repository_path })
-        } else {
-            Err(())
-        }
+    pub fn from_pwd() -> Result<Self> {
+        let repository_path = std::env::current_dir()?;
+        Ok(ActionOptions { repository_path })
     }
 }

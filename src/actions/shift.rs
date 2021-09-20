@@ -1,8 +1,10 @@
 use std::{
     fs,
-    io::{self, Seek, Write},
+    io::{Seek, Write},
     path::Path,
 };
+
+use anyhow::Result;
 
 use crate::{
     files::{Locations, RepositoryPaths},
@@ -11,14 +13,14 @@ use crate::{
 
 use super::ActionOptions;
 
-pub fn shift(command_options: ActionOptions, path: &str, new_cursor: usize) -> io::Result<()> {
+pub fn shift(command_options: ActionOptions, path: &str, new_cursor: usize) -> Result<()> {
     let locations = Locations::from(&command_options);
 
-    match RepositoryPaths::from_tracked(&locations, Path::new(path)) {
+    match RepositoryPaths::from_tracked(&locations, Path::new(path))? {
         RepositoryPaths::Tracked(tracked) => {
             let mut history_file = tracked.load_history_file()?;
 
-            let mut file_history = FileHistory::from_file(&mut history_file).unwrap();
+            let mut file_history = FileHistory::from_file(&mut history_file)?;
             file_history.set_cursor(new_cursor);
 
             if file_history.file_is_deleted() {
@@ -38,7 +40,7 @@ pub fn shift(command_options: ActionOptions, path: &str, new_cursor: usize) -> i
         RepositoryPaths::Deleted(deleted) => {
             let mut history_file = deleted.load_history_file()?;
 
-            let mut file_history = FileHistory::from_file(&mut history_file).unwrap();
+            let mut file_history = FileHistory::from_file(&mut history_file)?;
             file_history.set_cursor(new_cursor);
 
             if !file_history.file_is_deleted() {

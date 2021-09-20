@@ -1,10 +1,12 @@
-use std::{fs, io};
+use std::fs;
+
+use anyhow::Result;
 
 use crate::{actions::update, files::Locations};
 
 use super::ActionOptions;
 
-pub fn create(command_options: ActionOptions) -> io::Result<()> {
+pub fn create(command_options: ActionOptions) -> Result<()> {
     let locations = Locations::from(&command_options);
 
     if locations.ka_path.exists() {

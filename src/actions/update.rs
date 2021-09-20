@@ -1,4 +1,6 @@
-use std::io::{self, Read};
+use std::io::Read;
+
+use anyhow::{Context, Result};
 
 use crate::{
     files::{Locations, RepositoryPaths},
@@ -8,12 +10,12 @@ use crate::{
 
 use super::ActionOptions;
 
-pub fn update(command_options: ActionOptions) -> io::Result<()> {
+pub fn update(command_options: ActionOptions) -> Result<()> {
     let locations = Locations::from(&command_options);
 
     let entries = locations
         .get_repository_paths()
-        .expect("Could not traverse files.");
+        .context("Could not traverse files.")?;
 
     for element in entries {
         update_file(element, &locations)?;
@@ -22,11 +24,11 @@ pub fn update(command_options: ActionOptions) -> io::Result<()> {
     Ok(())
 }
 
-fn update_file(paths: RepositoryPaths, locations: &Locations) -> io::Result<()> {
+fn update_file(paths: RepositoryPaths, locations: &Locations) -> Result<()> {
     let new_state = match paths {
         RepositoryPaths::Deleted(deleted) => {
             let mut history_file = deleted.load_history_file()?;
-            let file_history = FileHistory::from_file(&mut history_file).unwrap();
+            let file_history = FileHistory::from_file(&mut history_file)?;
             if !file_history.file_is_deleted() {
                 let mut new_history = file_history;
                 new_history.add_change(FileChange::Deleted);
@@ -55,7 +57,7 @@ fn update_file(paths: RepositoryPaths, locations: &Locations) -> io::Result<()> 
             let mut history_file = tracked.load_history_file()?;
             let mut tracked_file = tracked.load_tracked_file()?;
 
-            let file_history = FileHistory::from_file(&mut history_file).unwrap();
+            let file_history = FileHistory::from_file(&mut history_file)?;
 
             let mut new_content = String::new();
             tracked_file.read_to_string(&mut new_content)?;
