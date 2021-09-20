@@ -1,35 +1,13 @@
 use difference::{Changeset, Difference};
 use serde::{Deserialize, Serialize};
 use std::{
-    env,
     fs::{self, DirEntry, File, OpenOptions},
     io::{self, Read, Seek, Write},
     path::{Path, PathBuf},
     vec,
 };
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    let command = args[1].as_str();
-    match command {
-        "create" => {
-            create_command().unwrap();
-        }
-        "update" => {
-            update_command().unwrap();
-        }
-        "shift" => {
-            let file_path = args[2].as_str();
-
-            let new_cursor: usize = args[3].as_str().parse().expect("Invalid cursor.");
-
-            shift_command(file_path, new_cursor);
-        }
-        _ => println!("Unknown command: {}", command),
-    }
-}
-
-fn create_command() -> io::Result<()> {
+pub fn create_command() -> io::Result<()> {
     let repository_directory = Path::new("./repository");
 
     let ka_directory = repository_directory.join(".ka");
@@ -47,7 +25,7 @@ fn create_command() -> io::Result<()> {
     Ok(())
 }
 
-fn update_command() -> io::Result<()> {
+pub fn update_command() -> io::Result<()> {
     let repository_directory = Path::new("./repository");
 
     let ka_directory = repository_directory.join(".ka");
@@ -65,7 +43,7 @@ fn update_command() -> io::Result<()> {
     Ok(())
 }
 
-fn shift_command(path: &str, new_cursor: usize) {
+pub fn shift_command(path: &str, new_cursor: usize) {
     let repository_directory = Path::new("./repository");
 
     let ka_directory = repository_directory.join(".ka");
