@@ -15,51 +15,51 @@ pub struct Locations {
 }
 
 impl Locations {
-    pub fn get_repository_paths(&self) -> Result<Vec<RepositoryPaths>, Error> {
-        let repository_entries =
-            fs::read_dir(&self.repository_path).context("Failed reading tracked file entries.")?;
+    pub fn get_repository_files(&self) -> Result<Vec<FileState>, Error> {
+        let working_entries =
+            fs::read_dir(&self.repository_path).context("Failed reading working file entries.")?;
         let history_entries =
             fs::read_dir(&self.ka_files_path).context("Failed reading history file entries.")?;
 
-        let tracked_paths = Self::walk_directory(repository_entries, &|entry| {
+        let working_files = Self::walk_directory(working_entries, &|entry| {
             let file_path = entry.path();
             if file_path != self.ka_path {
-                RepositoryPaths::from_tracked(&self, &file_path).ok()
+                FileState::from_working(&self, &file_path).ok()
             } else {
                 None
             }
         })?;
 
-        let deleted_paths = Self::walk_directory(history_entries, &|entry| {
+        let deleted_files = Self::walk_directory(history_entries, &|entry| {
             let file_path = entry.path();
-            let file = RepositoryPaths::from_history(&self, &file_path).ok()?;
+            let file = FileState::from_history(&self, &file_path).ok()?;
             match file {
-                RepositoryPaths::Deleted { .. } => Some(file),
-                RepositoryPaths::Tracked { .. } => None,
+                FileState::Deleted { .. } => Some(file),
+                FileState::Tracked { .. } => None,
                 _ => unreachable!(),
             }
         })?;
 
-        let mut all_paths = tracked_paths;
-        all_paths.extend(deleted_paths);
+        let mut all_files = working_files;
+        all_files.extend(deleted_files);
 
-        Ok(all_paths)
+        Ok(all_files)
     }
 
-    pub fn tracked_from_history(&self, history_file_path: &Path) -> Result<PathBuf> {
+    pub fn working_from_history(&self, history_file_path: &Path) -> Result<PathBuf> {
         let raw_path = history_file_path.strip_prefix(&self.ka_files_path)?;
         Ok(self.repository_path.join(raw_path))
     }
 
-    pub fn history_from_tracked(&self, tracked_file_path: &Path) -> Result<PathBuf> {
-        let raw_path = tracked_file_path.strip_prefix(&self.repository_path)?;
+    pub fn history_from_working(&self, working_file_path: &Path) -> Result<PathBuf> {
+        let raw_path = working_file_path.strip_prefix(&self.repository_path)?;
         Ok(self.ka_files_path.join(raw_path))
     }
 
     fn walk_directory(
         directory: ReadDir,
-        filter_map: &dyn Fn(DirEntry) -> Option<RepositoryPaths>,
-    ) -> Result<Vec<RepositoryPaths>> {
+        filter_map: &dyn Fn(DirEntry) -> Option<FileState>,
+    ) -> Result<Vec<FileState>> {
         let mut entries = Vec::new();
 
         for res in directory {
@@ -67,11 +67,11 @@ impl Locations {
             let file_type = entry.file_type()?;
             if file_type.is_dir() {
                 let nested_directory = fs::read_dir(entry.path())?;
-                let nested_paths = Self::walk_directory(nested_directory, filter_map)?;
-                entries.extend(nested_paths);
+                let nested_files = Self::walk_directory(nested_directory, filter_map)?;
+                entries.extend(nested_files);
             } else {
-                if let Some(paths) = filter_map(entry) {
-                    entries.push(paths);
+                if let Some(states) = filter_map(entry) {
+                    entries.push(states);
                 }
             }
         }
@@ -93,37 +93,37 @@ impl From<&ActionOptions> for Locations {
     }
 }
 
-pub enum RepositoryPaths {
+pub enum FileState {
     Deleted(FileDeleted),
     Untracked(FileUntracked),
     Tracked(FileTracked),
 }
 
-impl RepositoryPaths {
+impl FileState {
     pub fn from_history(locations: &Locations, history_file_path: &Path) -> Result<Self> {
-        let tracked_path = locations.tracked_from_history(history_file_path)?;
-        Ok(if !tracked_path.exists() {
-            RepositoryPaths::Deleted(FileDeleted {
+        let working_path = locations.working_from_history(history_file_path)?;
+        Ok(if !working_path.exists() {
+            FileState::Deleted(FileDeleted {
                 history_path: history_file_path.to_path_buf(),
             })
         } else {
-            RepositoryPaths::Tracked(FileTracked {
+            FileState::Tracked(FileTracked {
                 history_path: history_file_path.to_path_buf(),
-                tracked_path,
+                working_path,
             })
         })
     }
 
-    pub fn from_tracked(locations: &Locations, tracked_file_path: &Path) -> Result<Self> {
-        let history_path = locations.history_from_tracked(tracked_file_path)?;
+    pub fn from_working(locations: &Locations, working_file_path: &Path) -> Result<Self> {
+        let history_path = locations.history_from_working(working_file_path)?;
         Ok(if !history_path.exists() {
-            RepositoryPaths::Untracked(FileUntracked {
-                path: tracked_file_path.to_path_buf(),
+            FileState::Untracked(FileUntracked {
+                path: working_file_path.to_path_buf(),
             })
         } else {
-            RepositoryPaths::Tracked(FileTracked {
+            FileState::Tracked(FileTracked {
                 history_path,
-                tracked_path: tracked_file_path.to_path_buf(),
+                working_path: working_file_path.to_path_buf(),
             })
         })
     }
@@ -141,9 +141,9 @@ impl FileDeleted {
             .open(&self.history_path)
     }
 
-    pub fn create_tracked_file(&self, locations: &Locations) -> Result<File> {
+    pub fn create_working_file(&self, locations: &Locations) -> Result<File> {
         Ok(File::create(
-            locations.tracked_from_history(&self.history_path)?,
+            locations.working_from_history(&self.history_path)?,
         )?)
     }
 }
@@ -158,7 +158,7 @@ impl FileUntracked {
     }
 
     pub fn create_history_file(&self, locations: &Locations) -> Result<File> {
-        let history_path = locations.history_from_tracked(&self.path)?;
+        let history_path = locations.history_from_working(&self.path)?;
 
         if let Some(parent_path) = history_path.parent(){
             if !parent_path.exists() {
@@ -172,7 +172,7 @@ impl FileUntracked {
 
 pub struct FileTracked {
     history_path: PathBuf,
-    tracked_path: PathBuf,
+    working_path: PathBuf,
 }
 
 impl FileTracked {
@@ -183,11 +183,11 @@ impl FileTracked {
             .open(&self.history_path)
     }
 
-    pub fn load_tracked_file(&self) -> io::Result<File> {
-        File::open(&self.tracked_path)
+    pub fn load_working_file(&self) -> io::Result<File> {
+        File::open(&self.working_path)
     }
 
-    pub fn create_tracked_file(&self) -> io::Result<File> {
-        File::create(&self.tracked_path)
+    pub fn create_working_file(&self) -> io::Result<File> {
+        File::create(&self.working_path)
     }
 }

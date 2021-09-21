@@ -3,7 +3,7 @@ use std::io::Read;
 use anyhow::{Context, Result};
 
 use crate::{
-    files::{Locations, RepositoryPaths},
+    files::{Locations, FileState},
     history::{FileChange, FileHistory},
     text_diff::TextChange,
 };
@@ -14,7 +14,7 @@ pub fn update(command_options: ActionOptions) -> Result<()> {
     let locations = Locations::from(&command_options);
 
     let entries = locations
-        .get_repository_paths()
+        .get_repository_files()
         .context("Could not traverse files.")?;
 
     for element in entries {
@@ -24,9 +24,9 @@ pub fn update(command_options: ActionOptions) -> Result<()> {
     Ok(())
 }
 
-fn update_file(paths: RepositoryPaths, locations: &Locations) -> Result<()> {
-    let new_state = match paths {
-        RepositoryPaths::Deleted(deleted) => {
+fn update_file(file_state: FileState, locations: &Locations) -> Result<()> {
+    let new_state = match file_state {
+        FileState::Deleted(deleted) => {
             let mut history_file = deleted.load_history_file()?;
             let file_history = FileHistory::from_file(&mut history_file)?;
             if !file_history.file_is_deleted() {
@@ -37,7 +37,7 @@ fn update_file(paths: RepositoryPaths, locations: &Locations) -> Result<()> {
                 None
             }
         }
-        RepositoryPaths::Untracked(untracked) => {
+        FileState::Untracked(untracked) => {
             let mut file = untracked.load_file()?;
 
             let mut file_content = String::new();
@@ -53,14 +53,14 @@ fn update_file(paths: RepositoryPaths, locations: &Locations) -> Result<()> {
 
             Some((untracked.create_history_file(locations)?, new_history))
         }
-        RepositoryPaths::Tracked(tracked) => {
+        FileState::Tracked(tracked) => {
             let mut history_file = tracked.load_history_file()?;
-            let mut tracked_file = tracked.load_tracked_file()?;
+            let mut working_file = tracked.load_working_file()?;
 
             let file_history = FileHistory::from_file(&mut history_file)?;
 
             let mut new_content = String::new();
-            tracked_file.read_to_string(&mut new_content)?;
+            working_file.read_to_string(&mut new_content)?;
 
             let old_content = file_history.get_content();
 

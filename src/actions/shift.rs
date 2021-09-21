@@ -7,7 +7,7 @@ use std::{
 use anyhow::Result;
 
 use crate::{
-    files::{Locations, RepositoryPaths},
+    files::{Locations, FileState},
     history::FileHistory,
 };
 
@@ -16,8 +16,8 @@ use super::ActionOptions;
 pub fn shift(command_options: ActionOptions, path: &str, new_cursor: usize) -> Result<()> {
     let locations = Locations::from(&command_options);
 
-    match RepositoryPaths::from_tracked(&locations, Path::new(path))? {
-        RepositoryPaths::Tracked(tracked) => {
+    match FileState::from_working(&locations, Path::new(path))? {
+        FileState::Tracked(tracked) => {
             let mut history_file = tracked.load_history_file()?;
 
             let mut file_history = FileHistory::from_file(&mut history_file)?;
@@ -27,30 +27,30 @@ pub fn shift(command_options: ActionOptions, path: &str, new_cursor: usize) -> R
                 fs::remove_file(path)?;
             } else {
                 let new_content = file_history.get_content();
-                let mut tracked_file = tracked.create_tracked_file()?;
+                let mut working_file = tracked.create_working_file()?;
 
-                tracked_file.rewind()?;
-                tracked_file.set_len(0)?;
+                working_file.rewind()?;
+                working_file.set_len(0)?;
 
-                tracked_file.write_all(new_content.as_bytes())?;
+                working_file.write_all(new_content.as_bytes())?;
             }
 
             file_history.write_to_file(&mut history_file)?;
         }
-        RepositoryPaths::Deleted(deleted) => {
+        FileState::Deleted(deleted) => {
             let mut history_file = deleted.load_history_file()?;
 
             let mut file_history = FileHistory::from_file(&mut history_file)?;
             file_history.set_cursor(new_cursor);
 
             if !file_history.file_is_deleted() {
-                let mut new_tracked_file = deleted.create_tracked_file(&locations)?;
+                let mut new_working_file = deleted.create_working_file(&locations)?;
                 let new_content = file_history.get_content();
 
-                new_tracked_file.write_all(new_content.as_bytes())?;
+                new_working_file.write_all(new_content.as_bytes())?;
             }
         }
-        RepositoryPaths::Untracked(_) => panic!("File is not tracked with Ka."),
+        FileState::Untracked(_) => panic!("File is not tracked with Ka."),
     }
 
     Ok(())
