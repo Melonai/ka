@@ -26,12 +26,12 @@ impl Locations {
             fs::read_dir(&self.ka_files_path).context("Failed reading history file entries.")?;
 
         let working_files = Self::walk_directory(working_entries, &|entry| {
-            FileState::from_working(&self, &entry.path()).ok()
+            FileState::from_working(self, &entry.path()).ok()
         })?;
 
         let deleted_files = Self::walk_directory(history_entries, &|entry| {
             let file_path = entry.path();
-            let file = FileState::from_history(&self, &file_path).ok()?;
+            let file = FileState::from_history(self, &file_path).ok()?;
             match file {
                 FileState::Deleted { .. } => Some(file),
                 FileState::Tracked { .. } => None,
@@ -68,10 +68,8 @@ impl Locations {
                 let nested_directory = fs::read_dir(entry.path())?;
                 let nested_files = Self::walk_directory(nested_directory, filter_map)?;
                 entries.extend(nested_files);
-            } else {
-                if let Some(states) = filter_map(entry) {
-                    entries.push(states);
-                }
+            } else if let Some(states) = filter_map(entry) {
+                entries.push(states);
             }
         }
 

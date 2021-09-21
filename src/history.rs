@@ -22,7 +22,7 @@ impl FileHistory {
             .context("Failed reading file history.")?;
 
         let file_history = serde_json::from_slice::<FileHistory>(&buffer);
-        Ok(file_history.context("Corrupted file history.")?)
+        file_history.context("Corrupted file history.")
     }
 
     pub fn write_to_file(&self, file: &mut File) -> anyhow::Result<()> {
