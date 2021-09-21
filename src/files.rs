@@ -1,5 +1,5 @@
 use std::{
-    fs::{self, DirEntry, File, OpenOptions, ReadDir},
+    fs::{self, DirEntry, File, OpenOptions},
     io,
     path::{Path, PathBuf},
 };
@@ -16,18 +16,17 @@ pub struct Locations {
 
 impl Locations {
     pub fn get_repository_files(&self) -> Result<Vec<FileState>, Error> {
-        let working_entries =
-            fs::read_dir(&self.repository_path).context("Failed reading working file entries.")?;
+        let working_entries = fs::read_dir(&self.repository_path)
+            .context("Failed reading working file entries.")?
+            .filter(|res| {
+                res.as_ref()
+                    .map_or(true, |entry| entry.path() != self.ka_path)
+            });
         let history_entries =
             fs::read_dir(&self.ka_files_path).context("Failed reading history file entries.")?;
 
         let working_files = Self::walk_directory(working_entries, &|entry| {
-            let file_path = entry.path();
-            if file_path != self.ka_path {
-                FileState::from_working(&self, &file_path).ok()
-            } else {
-                None
-            }
+            FileState::from_working(&self, &entry.path()).ok()
         })?;
 
         let deleted_files = Self::walk_directory(history_entries, &|entry| {
@@ -57,7 +56,7 @@ impl Locations {
     }
 
     fn walk_directory(
-        directory: ReadDir,
+        directory: impl Iterator<Item = io::Result<DirEntry>>,
         filter_map: &dyn Fn(DirEntry) -> Option<FileState>,
     ) -> Result<Vec<FileState>> {
         let mut entries = Vec::new();
@@ -160,11 +159,11 @@ impl FileUntracked {
     pub fn create_history_file(&self, locations: &Locations) -> Result<File> {
         let history_path = locations.history_from_working(&self.path)?;
 
-        if let Some(parent_path) = history_path.parent(){
+        if let Some(parent_path) = history_path.parent() {
             if !parent_path.exists() {
                 fs::create_dir_all(parent_path)?;
             }
-        } 
+        }
 
         Ok(File::create(history_path)?)
     }
