@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use anyhow::{Context, Result};
 
-use crate::text_diff::TextChange;
+use crate::diff::ContentChange;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FileHistory {
@@ -39,15 +39,15 @@ impl FileHistory {
         }
     }
 
-    pub fn get_content(&self) -> String {
-        let mut buffer = String::new();
+    pub fn get_content(&self) -> Vec<u8> {
+        let mut buffer = Vec::new();
         for file_change in self.changes.iter().take(self.cursor) {
             if let FileChange::Updated(ref updated) = file_change {
                 for change in updated.iter() {
                     change.apply(&mut buffer)
                 }
             } else {
-                buffer = String::new();
+                buffer.drain(0..);
             }
         }
         buffer
@@ -89,6 +89,6 @@ impl Default for FileHistory {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum FileChange {
-    Updated(Vec<TextChange>),
+    Updated(Vec<ContentChange>),
     Deleted,
 }

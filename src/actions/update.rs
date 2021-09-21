@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use crate::{
     files::{Locations, FileState},
     history::{FileChange, FileHistory},
-    text_diff::TextChange,
+    diff::ContentChange,
 };
 
 use super::ActionOptions;
@@ -40,10 +40,10 @@ fn update_file(file_state: FileState, locations: &Locations) -> Result<()> {
         FileState::Untracked(untracked) => {
             let mut file = untracked.load_file()?;
 
-            let mut file_content = String::new();
-            file.read_to_string(&mut file_content)?;
+            let mut file_content = Vec::new();
+            file.read_to_end(&mut file_content)?;
 
-            let change = FileChange::Updated(vec![TextChange::Inserted {
+            let change = FileChange::Updated(vec![ContentChange::Inserted {
                 at: 0,
                 new_content: file_content,
             }]);
@@ -59,12 +59,12 @@ fn update_file(file_state: FileState, locations: &Locations) -> Result<()> {
 
             let file_history = FileHistory::from_file(&mut history_file)?;
 
-            let mut new_content = String::new();
-            working_file.read_to_string(&mut new_content)?;
+            let mut new_content = Vec::new();
+            working_file.read_to_end(&mut new_content)?;
 
             let old_content = file_history.get_content();
 
-            let changes = TextChange::diff(&old_content, &new_content);
+            let changes = ContentChange::diff(&old_content, &new_content);
 
             let mut new_history = file_history;
             new_history.add_change(FileChange::Updated(changes));

@@ -32,7 +32,7 @@ pub fn shift(command_options: ActionOptions, path: &str, new_cursor: usize) -> R
                 working_file.rewind()?;
                 working_file.set_len(0)?;
 
-                working_file.write_all(new_content.as_bytes())?;
+                working_file.write_all(&new_content)?;
             }
 
             file_history.write_to_file(&mut history_file)?;
@@ -47,7 +47,7 @@ pub fn shift(command_options: ActionOptions, path: &str, new_cursor: usize) -> R
                 let mut new_working_file = deleted.create_working_file(&locations)?;
                 let new_content = file_history.get_content();
 
-                new_working_file.write_all(new_content.as_bytes())?;
+                new_working_file.write_all(&new_content)?;
             }
         }
         FileState::Untracked(_) => panic!("File is not tracked with Ka."),
