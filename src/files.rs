@@ -15,6 +15,10 @@ pub struct Locations {
 }
 
 impl Locations {
+    pub fn get_repository_index(&self) -> PathBuf {
+        return self.ka_path.join("index")
+    }
+
     pub fn get_repository_files(&self) -> Result<Vec<FileState>, Error> {
         let working_entries = fs::read_dir(&self.repository_path)
             .context("Failed reading working file entries.")?
@@ -124,10 +128,18 @@ impl FileState {
             })
         })
     }
+
+    pub fn get_working_path(&self, locations: &Locations) -> Result<PathBuf> {
+        match self {
+            FileState::Deleted(deleted) => locations.working_from_history(&deleted.history_path),
+            FileState::Untracked(untracked) => Ok(untracked.path.clone()),
+            FileState::Tracked(tracked) => Ok(tracked.working_path.clone()),
+        }
+    }
 }
 
 pub struct FileDeleted {
-    history_path: PathBuf,
+    pub history_path: PathBuf,
 }
 
 impl FileDeleted {
@@ -146,7 +158,7 @@ impl FileDeleted {
 }
 
 pub struct FileUntracked {
-    path: PathBuf,
+    pub path: PathBuf,
 }
 
 impl FileUntracked {
@@ -168,8 +180,8 @@ impl FileUntracked {
 }
 
 pub struct FileTracked {
-    history_path: PathBuf,
-    working_path: PathBuf,
+    pub history_path: PathBuf,
+    pub working_path: PathBuf,
 }
 
 impl FileTracked {
