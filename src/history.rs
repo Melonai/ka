@@ -34,6 +34,10 @@ impl RepositoryHistory {
         Ok(())
     }
 
+    pub fn get_changes(&self) -> &Vec<RepositoryChange> {
+        &self.changes
+    }
+
     pub fn add_change(&mut self, change: RepositoryChange) {
         self.changes.push(change);
     }

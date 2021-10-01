@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs::{self, OpenOptions},
     io::{Seek, Write},
 };
@@ -19,12 +20,31 @@ pub fn shift(command_options: ActionOptions, new_cursor: usize) -> Result<()> {
     let mut repository_index_file = OpenOptions::new().write(true).open(repository_index_path)?;
     let mut repository_history = RepositoryHistory::from_file(&mut repository_index_file)?;
 
+    let old_cursor = repository_history.cursor;
+
     repository_history.cursor = new_cursor;
     repository_history.write_to_file(&mut repository_index_file)?;
 
-    // TOOD: Only shift files which would be affected by cursor change
+    let changes_between_cursors = if old_cursor < new_cursor {
+        old_cursor..new_cursor
+    } else {
+        new_cursor..old_cursor
+    };
 
-    for state in locations.get_repository_files()? {
+    let affected_files_by_shift: Result<Vec<FileState>> = repository_history.get_changes()
+        [changes_between_cursors]
+        .iter()
+        .fold(HashSet::new(), |mut acc, change| {
+            for path in change.affected_files.iter() {
+                acc.insert(path);
+            }
+            acc
+        })
+        .iter()
+        .map(|path| FileState::from_working(&locations, path))
+        .collect();
+
+    for state in affected_files_by_shift? {
         match state {
             FileState::Tracked(tracked) => {
                 let mut history_file = tracked.load_history_file()?;
