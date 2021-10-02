@@ -14,7 +14,9 @@ pub trait Fs {
     fn open_readable_file(&self, path: &Path) -> Result<Self::File>;
     fn open_writable_file(&self, path: &Path) -> Result<Self::File>;
 
+    fn create_directory(&self, path: &Path) -> Result<()>;
     fn read_directory(&self, path: &Path) -> Result<Vec<Self::Entry>>;
+    fn delete_directory(&self, path: &Path) -> Result<()>;
 
     fn write_to_file(&self, file: &mut Self::File, buffer: Vec<u8>) -> Result<()>;
     fn read_from_file(&self, file: &mut Self::File) -> Result<Vec<u8>>;
@@ -71,9 +73,19 @@ impl Fs for FsImpl {
             })
     }
 
+    fn create_directory(&self, path: &Path) -> Result<()> {
+        fs::create_dir_all(path)
+            .with_context(|| format!("Failed creating directory '{}'.", path.display()))
+    }
+
     fn read_directory(&self, path: &Path) -> Result<Vec<Self::Entry>> {
         let result: io::Result<_> = fs::read_dir(path)?.collect();
         result.with_context(|| format!("Failed reading directory {}", path.display()))
+    }
+
+    fn delete_directory(&self, path: &Path) -> Result<()> {
+        fs::remove_dir_all(path)
+            .with_context(|| format!("Failed deleting directory '{}'.", path.display()))
     }
 
     fn write_to_file(&self, file: &mut Self::File, buffer: Vec<u8>) -> Result<()> {
@@ -197,6 +209,11 @@ pub mod mock {
             })
         }
 
+        fn create_directory(&self, path: &Path) -> Result<()> {
+            self.add_call(path, ReceivedCallVariant::DirectoryCreated);
+            Ok(())
+        }
+
         fn read_directory(&self, path: &Path) -> Result<Vec<Self::Entry>> {
             self.add_call(path, ReceivedCallVariant::DirectoryRead);
 
@@ -205,6 +222,11 @@ pub mod mock {
             } else {
                 panic!("No content to read.");
             }
+        }
+
+        fn delete_directory(&self, path: &Path) -> Result<()> {
+            self.add_call(path, ReceivedCallVariant::DirectoryDeleted);
+            Ok(())
         }
 
         fn write_to_file(&self, file: &mut Self::File, buffer: Vec<u8>) -> Result<()> {
@@ -274,7 +296,9 @@ pub mod mock {
         DeleteFile,
         OpenReadableFile,
         OpenWritableFile,
+        CreateDirectory,
         ReadDirectory { entries: Vec<EntryMock> },
+        DeleteDirectory,
         ReadFile { read_content: Vec<u8> },
         WriteToFile,
         PathExists(bool),
@@ -290,7 +314,9 @@ pub mod mock {
         FileDeleted,
         ReadableFileOpened,
         WritableFileOpened,
+        DirectoryCreated,
         DirectoryRead,
+        DirectoryDeleted,
         FileRead,
         FileWritten { written_content: Vec<u8> },
         DoesPathExist,
