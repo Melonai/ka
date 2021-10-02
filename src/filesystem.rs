@@ -150,25 +150,33 @@ pub mod mock {
             }
         }
 
-        fn add_call(&self, path: &Path, variant: ReceivedCallVariant) {
-            let call = ReceivedCall {
-                affected_path: path.to_path_buf(),
-                variant,
-            };
+        pub fn set_expected_calls(&self, calls: Vec<ExpectedCall>) {
+            let mut state = self.state.lock().expect("File system mock lock poisoned.");
+            state.expected_calls = calls;
+        }
 
+        pub fn assert_calls(self) {
+            let state = self.state.lock().expect("File system lock poisoned.");
+
+            let calls = state.received_calls.iter().zip(state.expected_calls.iter());
+
+            for (received, expected) in calls {
+                expected.assert_received(received)
+            }
+        }
+
+        fn add_call(&self, call: ReceivedCall) {
             let mut state = self.state.lock().expect("File system mock lock poisoned.");
             state.received_calls.push(call);
         }
 
-        fn get_expected_call(&self) -> ExpectedCallVariant {
+        fn get_expected_call(&self) -> Option<ExpectedCallVariant> {
             let state = self.state.lock().expect("File system lock poisoned.");
 
-            let expected_call = state
+            state
                 .expected_calls
-                .get(state.received_calls.len() - 1)
-                .expect("Unexpected call.");
-
-            expected_call.variant.clone()
+                .get(state.received_calls.len())
+                .map(|e| e.variant.clone())
         }
     }
 
@@ -177,7 +185,8 @@ pub mod mock {
         type Entry = EntryMock;
 
         fn create_file(&self, path: &Path) -> Result<Self::File> {
-            self.add_call(path, ReceivedCallVariant::FileCreated);
+            let call = ReceivedCall::new(path, ReceivedCallVariant::FileCreated);
+            self.add_call(call);
 
             Ok(FileMock {
                 path: path.to_path_buf(),
@@ -186,13 +195,15 @@ pub mod mock {
         }
 
         fn delete_file(&self, path: &Path) -> Result<()> {
-            self.add_call(path, ReceivedCallVariant::FileDeleted);
+            let call = ReceivedCall::new(path, ReceivedCallVariant::FileDeleted);
+            self.add_call(call);
 
             Ok(())
         }
 
         fn open_readable_file(&self, path: &Path) -> Result<Self::File> {
-            self.add_call(path, ReceivedCallVariant::ReadableFileOpened);
+            let call = ReceivedCall::new(path, ReceivedCallVariant::ReadableFileOpened);
+            self.add_call(call);
 
             Ok(FileMock {
                 path: path.to_path_buf(),
@@ -201,7 +212,8 @@ pub mod mock {
         }
 
         fn open_writable_file(&self, path: &Path) -> Result<Self::File> {
-            self.add_call(path, ReceivedCallVariant::WritableFileOpened);
+            let call = ReceivedCall::new(path, ReceivedCallVariant::WritableFileOpened);
+            self.add_call(call);
 
             Ok(FileMock {
                 path: path.to_path_buf(),
@@ -210,32 +222,49 @@ pub mod mock {
         }
 
         fn create_directory(&self, path: &Path) -> Result<()> {
-            self.add_call(path, ReceivedCallVariant::DirectoryCreated);
+            let call = ReceivedCall::new(path, ReceivedCallVariant::DirectoryCreated);
+            self.add_call(call);
+
             Ok(())
         }
 
         fn read_directory(&self, path: &Path) -> Result<Vec<Self::Entry>> {
-            self.add_call(path, ReceivedCallVariant::DirectoryRead);
+            let call = ReceivedCall::new(path, ReceivedCallVariant::DirectoryRead);
 
-            if let ExpectedCallVariant::ReadDirectory { entries } = self.get_expected_call() {
-                Ok(entries.to_vec())
+            let return_value = if let Some(expected_call) = self.get_expected_call() {
+                if let ExpectedCallVariant::ReadDirectory { returned } = expected_call {
+                    Ok(returned.to_vec())
+                } else {
+                    panic!(
+                        "Received unexpected call: {:?}, expected call: {:?}.",
+                        call, expected_call
+                    );
+                }
             } else {
-                panic!("No content to read.");
-            }
+                panic!(
+                    "Received unexpected call, with no expected call to compare it to: {:?}.",
+                    call
+                );
+            };
+
+            self.add_call(call);
+
+            return_value
         }
 
         fn delete_directory(&self, path: &Path) -> Result<()> {
-            self.add_call(path, ReceivedCallVariant::DirectoryDeleted);
+            let call = ReceivedCall::new(path, ReceivedCallVariant::DirectoryDeleted);
+            self.add_call(call);
+
             Ok(())
         }
 
         fn write_to_file(&self, file: &mut Self::File, buffer: Vec<u8>) -> Result<()> {
-            self.add_call(
+            let call = ReceivedCall::new(
                 &file.path,
-                ReceivedCallVariant::FileWritten {
-                    written_content: buffer,
-                },
+                ReceivedCallVariant::FileWritten { received: buffer },
             );
+            self.add_call(call);
 
             // TODO: Check whether file was opened with write flag.
 
@@ -243,27 +272,55 @@ pub mod mock {
         }
 
         fn read_from_file(&self, file: &mut Self::File) -> Result<Vec<u8>> {
-            self.add_call(&file.path, ReceivedCallVariant::FileRead);
+            let call = ReceivedCall::new(&file.path, ReceivedCallVariant::FileRead);
 
-            if let ExpectedCallVariant::ReadFile { read_content } = self.get_expected_call() {
-                Ok(read_content.clone())
+            let return_value = if let Some(expected_call) = self.get_expected_call() {
+                if let ExpectedCallVariant::ReadFile { returned } = expected_call {
+                    Ok(returned.clone())
+                } else {
+                    panic!(
+                        "Received unexpected call: {:?}, expected call: {:?}.",
+                        call, expected_call
+                    );
+                }
             } else {
-                panic!("No content to read.");
-            }
+                panic!(
+                    "Received unexpected call, with no expected call to compare it to: {:?}.",
+                    call
+                );
+            };
+
+            self.add_call(call);
+
+            return_value
         }
 
         fn path_exists(&self, path: &Path) -> bool {
-            self.add_call(path, ReceivedCallVariant::DoesPathExist);
+            let call = ReceivedCall::new(path, ReceivedCallVariant::DoesPathExist);
 
-            if let ExpectedCallVariant::PathExists(answer) = self.get_expected_call() {
-                return answer;
-            }
+            let return_value = if let Some(expected_call) = self.get_expected_call() {
+                if let ExpectedCallVariant::PathExists(answer) = expected_call {
+                    answer
+                } else {
+                    panic!(
+                        "Received unexpected call: {:?}, expected call: {:?}.",
+                        call, expected_call
+                    );
+                }
+            } else {
+                panic!(
+                    "Received unexpected call, with no expected call to compare it to: {:?}.",
+                    call
+                );
+            };
 
-            panic!("No mocked return value given for call.");
+            self.add_call(call);
+
+            return_value
         }
     }
 
-    #[derive(Clone)]
+    #[derive(Debug, Clone)]
     pub struct EntryMock {
         path: PathBuf,
         is_directory: bool,
@@ -285,31 +342,93 @@ pub mod mock {
     }
 
     // TODO: Do we need ways to return errors?
+    #[derive(Debug)]
     pub struct ExpectedCall {
         pub affected_path: PathBuf,
         pub variant: ExpectedCallVariant,
     }
 
-    #[derive(Clone)]
+    impl ExpectedCall {
+        pub fn new(path: &Path, variant: ExpectedCallVariant) -> Self {
+            ExpectedCall {
+                affected_path: path.to_path_buf(),
+                variant,
+            }
+        }
+
+        fn assert_received(&self, rec: &ReceivedCall) {
+            if self.affected_path == rec.affected_path {
+                use ExpectedCallVariant as E;
+                use ReceivedCallVariant as R;
+
+                let e = &self.variant;
+
+                let equal = match rec.variant {
+                    R::FileCreated => matches!(e, E::CreateFile),
+                    R::FileDeleted => matches!(e, E::DeleteFile),
+                    R::ReadableFileOpened => matches!(e, E::OpenReadableFile),
+                    R::WritableFileOpened => matches!(e, E::OpenWritableFile),
+                    R::DirectoryCreated => matches!(e, E::CreateDirectory),
+                    R::DirectoryRead => matches!(e, E::ReadDirectory { .. }),
+                    R::DirectoryDeleted => matches!(e, E::DeleteDirectory),
+                    R::FileRead => matches!(e, E::ReadFile { .. }),
+                    R::FileWritten { ref received } => {
+                        if let E::WriteToFile { expected } = e {
+                            expected == received
+                        } else {
+                            false
+                        }
+                    }
+                    R::DoesPathExist => matches!(e, E::PathExists(_)),
+                };
+
+                if equal {
+                    return;
+                }
+            }
+
+            panic!(
+                "
+                Expected call does not equal received call.
+                Expected: {:?}
+                Recevied: {:?}
+                ",
+                self, rec
+            );
+        }
+    }
+
+    #[derive(Debug, Clone)]
     pub enum ExpectedCallVariant {
         CreateFile,
         DeleteFile,
         OpenReadableFile,
         OpenWritableFile,
         CreateDirectory,
-        ReadDirectory { entries: Vec<EntryMock> },
+        ReadDirectory { returned: Vec<EntryMock> },
         DeleteDirectory,
-        ReadFile { read_content: Vec<u8> },
-        WriteToFile,
+        ReadFile { returned: Vec<u8> },
+        WriteToFile { expected: Vec<u8> },
         PathExists(bool),
     }
 
-    pub struct ReceivedCall {
-        pub affected_path: PathBuf,
-        pub variant: ReceivedCallVariant,
+    #[derive(Debug)]
+    struct ReceivedCall {
+        affected_path: PathBuf,
+        variant: ReceivedCallVariant,
     }
 
-    pub enum ReceivedCallVariant {
+    impl ReceivedCall {
+        fn new(path: &Path, variant: ReceivedCallVariant) -> Self {
+            ReceivedCall {
+                affected_path: path.to_path_buf(),
+                variant,
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    enum ReceivedCallVariant {
         FileCreated,
         FileDeleted,
         ReadableFileOpened,
@@ -318,7 +437,65 @@ pub mod mock {
         DirectoryRead,
         DirectoryDeleted,
         FileRead,
-        FileWritten { written_content: Vec<u8> },
+        FileWritten { received: Vec<u8> },
         DoesPathExist,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use crate::filesystem::{
+        mock::{ExpectedCall, ExpectedCallVariant},
+        Fs,
+    };
+
+    use super::mock::FsMock;
+
+    #[test]
+    fn mock_empty() {
+        let fs_mock = FsMock::new();
+        fs_mock.assert_calls();
+    }
+
+    #[test]
+    fn mock_file_basic() {
+        let fs_mock = FsMock::new();
+
+        let path = Path::new("file").to_path_buf();
+
+        fs_mock.set_expected_calls(vec![
+            ExpectedCall::new(&path, ExpectedCallVariant::CreateFile),
+            ExpectedCall::new(
+                &path,
+                ExpectedCallVariant::ReadFile {
+                    returned: vec![1, 2, 3],
+                },
+            ),
+        ]);
+
+        let mut file = fs_mock.create_file(&path).unwrap();
+        let received_content = fs_mock.read_from_file(&mut file).unwrap();
+
+        assert_eq!(received_content, vec![1, 2, 3]);
+
+        fs_mock.assert_calls();
+    }
+
+    #[test]
+    #[should_panic]
+    fn mock_unexpected_call() {
+        let fs_mock = FsMock::new();
+
+        let path = Path::new("file").to_path_buf();
+
+        fs_mock.set_expected_calls(vec![ExpectedCall::new(
+            &path,
+            ExpectedCallVariant::CreateFile,
+        )]);
+
+        fs_mock.delete_file(&path).unwrap();
+        fs_mock.assert_calls();
     }
 }
