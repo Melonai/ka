@@ -3,7 +3,7 @@ use anyhow::Result;
 
 use super::ActionOptions;
 
-pub fn create(command_options: ActionOptions, fs: &mut impl Fs) -> Result<()> {
+pub fn create(command_options: ActionOptions, fs: &impl Fs) -> Result<()> {
     let locations = Locations::from(&command_options);
     // FIXME: Re-add old repository deletion.
     // if locations.ka_path.exists() {

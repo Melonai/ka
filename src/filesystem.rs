@@ -9,17 +9,17 @@ pub trait Fs {
     type File;
     type Entry: FsEntry;
 
-    fn create_file(&mut self, path: &Path) -> Result<Self::File>;
-    fn delete_file(&mut self, path: &Path) -> Result<()>;
-    fn open_readable_file(&mut self, path: &Path) -> Result<Self::File>;
-    fn open_writable_file(&mut self, path: &Path) -> Result<Self::File>;
+    fn create_file(&self, path: &Path) -> Result<Self::File>;
+    fn delete_file(&self, path: &Path) -> Result<()>;
+    fn open_readable_file(&self, path: &Path) -> Result<Self::File>;
+    fn open_writable_file(&self, path: &Path) -> Result<Self::File>;
 
-    fn read_directory(&mut self, path: &Path) -> Result<Vec<Self::Entry>>;
+    fn read_directory(&self, path: &Path) -> Result<Vec<Self::Entry>>;
 
-    fn write_to_file(&mut self, file: &mut Self::File, buffer: Vec<u8>) -> Result<()>;
-    fn read_from_file(&mut self, file: &mut Self::File) -> Result<Vec<u8>>;
+    fn write_to_file(&self, file: &mut Self::File, buffer: Vec<u8>) -> Result<()>;
+    fn read_from_file(&self, file: &mut Self::File) -> Result<Vec<u8>>;
 
-    fn path_exists(&mut self, path: &Path) -> bool;
+    fn path_exists(&self, path: &Path) -> bool;
 }
 
 pub trait FsEntry {
@@ -33,7 +33,7 @@ impl Fs for FsImpl {
     type File = File;
     type Entry = DirEntry;
 
-    fn create_file(&mut self, path: &Path) -> Result<Self::File> {
+    fn create_file(&self, path: &Path) -> Result<Self::File> {
         if let Some(parent_path) = path.parent() {
             if !parent_path.exists() {
                 fs::create_dir_all(parent_path)?;
@@ -48,17 +48,17 @@ impl Fs for FsImpl {
             .with_context(|| format!("Failed creating '{}'.", path.display()))
     }
 
-    fn delete_file(&mut self, path: &Path) -> Result<()> {
+    fn delete_file(&self, path: &Path) -> Result<()> {
         fs::remove_file(path)?;
         Ok(())
     }
 
-    fn open_readable_file(&mut self, path: &Path) -> Result<Self::File> {
+    fn open_readable_file(&self, path: &Path) -> Result<Self::File> {
         File::open(path)
             .with_context(|| format!("Failed opening '{}' for reading.", path.display()))
     }
 
-    fn open_writable_file(&mut self, path: &Path) -> Result<Self::File> {
+    fn open_writable_file(&self, path: &Path) -> Result<Self::File> {
         OpenOptions::new()
             .read(true)
             .write(true)
@@ -71,25 +71,25 @@ impl Fs for FsImpl {
             })
     }
 
-    fn read_directory(&mut self, path: &Path) -> Result<Vec<Self::Entry>> {
+    fn read_directory(&self, path: &Path) -> Result<Vec<Self::Entry>> {
         let result: io::Result<_> = fs::read_dir(path)?.collect();
         result.with_context(|| format!("Failed reading directory {}", path.display()))
     }
 
-    fn write_to_file(&mut self, file: &mut Self::File, buffer: Vec<u8>) -> Result<()> {
+    fn write_to_file(&self, file: &mut Self::File, buffer: Vec<u8>) -> Result<()> {
         file.rewind()?;
         file.set_len(0)?;
         file.write_all(&buffer)?;
         Ok(())
     }
 
-    fn read_from_file(&mut self, file: &mut Self::File) -> Result<Vec<u8>> {
+    fn read_from_file(&self, file: &mut Self::File) -> Result<Vec<u8>> {
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer)?;
         Ok(buffer)
     }
 
-    fn path_exists(&mut self, path: &Path) -> bool {
+    fn path_exists(&self, path: &Path) -> bool {
         path.exists()
     }
 }
@@ -109,22 +109,54 @@ impl FsEntry for DirEntry {
 #[allow(dead_code)]
 #[cfg(test)]
 pub mod mock {
-    use anyhow::{Error, Result};
-    use std::path::{Path, PathBuf};
+    use anyhow::Result;
+    use std::{
+        path::{Path, PathBuf},
+        sync::{Arc, Mutex},
+    };
 
     use super::{Fs, FsEntry};
 
     pub struct FsMock {
+        state: Arc<Mutex<FsMockState>>,
+    }
+
+    struct FsMockState {
         expected_calls: Vec<ExpectedCall>,
         received_calls: Vec<ReceivedCall>,
     }
 
     impl FsMock {
         pub fn new() -> Self {
-            FsMock {
+            let state = FsMockState {
                 expected_calls: Vec::new(),
                 received_calls: Vec::new(),
+            };
+
+            FsMock {
+                state: Arc::new(Mutex::new(state)),
             }
+        }
+
+        fn add_call(&self, path: &Path, variant: ReceivedCallVariant) {
+            let call = ReceivedCall {
+                affected_path: path.to_path_buf(),
+                variant,
+            };
+
+            let mut state = self.state.lock().expect("File system mock lock poisoned.");
+            state.received_calls.push(call);
+        }
+
+        fn get_expected_call(&self) -> ExpectedCallVariant {
+            let state = self.state.lock().expect("File system lock poisoned.");
+
+            let expected_call = state
+                .expected_calls
+                .get(state.received_calls.len() - 1)
+                .expect("Unexpected call.");
+
+            expected_call.variant.clone()
         }
     }
 
@@ -132,13 +164,8 @@ pub mod mock {
         type File = FileMock;
         type Entry = EntryMock;
 
-        fn create_file(&mut self, path: &Path) -> Result<Self::File> {
-            let call = ReceivedCall {
-                affected_path: path.to_path_buf(),
-                variant: ReceivedCallVariant::FileCreated,
-            };
-
-            self.received_calls.push(call);
+        fn create_file(&self, path: &Path) -> Result<Self::File> {
+            self.add_call(path, ReceivedCallVariant::FileCreated);
 
             Ok(FileMock {
                 path: path.to_path_buf(),
@@ -146,24 +173,14 @@ pub mod mock {
             })
         }
 
-        fn delete_file(&mut self, path: &Path) -> Result<()> {
-            let call = ReceivedCall {
-                affected_path: path.to_path_buf(),
-                variant: ReceivedCallVariant::FileCreated,
-            };
-
-            self.received_calls.push(call);
+        fn delete_file(&self, path: &Path) -> Result<()> {
+            self.add_call(path, ReceivedCallVariant::FileDeleted);
 
             Ok(())
         }
 
-        fn open_readable_file(&mut self, path: &Path) -> Result<Self::File> {
-            let call = ReceivedCall {
-                affected_path: path.to_path_buf(),
-                variant: ReceivedCallVariant::ReadableFileOpened,
-            };
-
-            self.received_calls.push(call);
+        fn open_readable_file(&self, path: &Path) -> Result<Self::File> {
+            self.add_call(path, ReceivedCallVariant::ReadableFileOpened);
 
             Ok(FileMock {
                 path: path.to_path_buf(),
@@ -171,13 +188,8 @@ pub mod mock {
             })
         }
 
-        fn open_writable_file(&mut self, path: &Path) -> Result<Self::File> {
-            let call = ReceivedCall {
-                affected_path: path.to_path_buf(),
-                variant: ReceivedCallVariant::WritableFileOpened,
-            };
-
-            self.received_calls.push(call);
+        fn open_writable_file(&self, path: &Path) -> Result<Self::File> {
+            self.add_call(path, ReceivedCallVariant::WritableFileOpened);
 
             Ok(FileMock {
                 path: path.to_path_buf(),
@@ -185,73 +197,44 @@ pub mod mock {
             })
         }
 
-        fn read_directory(&mut self, path: &Path) -> Result<Vec<Self::Entry>> {
-            let call = ReceivedCall {
-                affected_path: path.to_path_buf(),
-                variant: ReceivedCallVariant::DirectoryRead,
-            };
+        fn read_directory(&self, path: &Path) -> Result<Vec<Self::Entry>> {
+            self.add_call(path, ReceivedCallVariant::DirectoryRead);
 
-            self.received_calls.push(call);
-
-            let expected_call_option = self.expected_calls.get(self.received_calls.len() - 1);
-
-            if let Some(expected_call) = expected_call_option {
-                if let ExpectedCallVariant::ReadDirectory { entries } = &expected_call.variant {
-                    return Ok(entries.to_vec());
-                }
+            if let ExpectedCallVariant::ReadDirectory { entries } = self.get_expected_call() {
+                Ok(entries.to_vec())
+            } else {
+                panic!("No content to read.");
             }
-
-            Err(Error::msg("No content to read."))
         }
 
-        fn write_to_file(&mut self, file: &mut Self::File, buffer: Vec<u8>) -> Result<()> {
-            let call = ReceivedCall {
-                affected_path: file.path.clone(),
-                variant: ReceivedCallVariant::FileWritten {
+        fn write_to_file(&self, file: &mut Self::File, buffer: Vec<u8>) -> Result<()> {
+            self.add_call(
+                &file.path,
+                ReceivedCallVariant::FileWritten {
                     written_content: buffer,
                 },
-            };
+            );
 
             // TODO: Check whether file was opened with write flag.
-
-            self.received_calls.push(call);
 
             Ok(())
         }
 
-        fn read_from_file(&mut self, file: &mut Self::File) -> Result<Vec<u8>> {
-            let call = ReceivedCall {
-                affected_path: file.path.clone(),
-                variant: ReceivedCallVariant::FileRead,
-            };
+        fn read_from_file(&self, file: &mut Self::File) -> Result<Vec<u8>> {
+            self.add_call(&file.path, ReceivedCallVariant::FileRead);
 
-            self.received_calls.push(call);
-
-            let expected_call_option = self.expected_calls.get(self.received_calls.len() - 1);
-
-            if let Some(expected_call) = expected_call_option {
-                if let ExpectedCallVariant::ReadFile { read_content } = &expected_call.variant {
-                    return Ok(read_content.clone());
-                }
+            if let ExpectedCallVariant::ReadFile { read_content } = self.get_expected_call() {
+                Ok(read_content.clone())
+            } else {
+                panic!("No content to read.");
             }
-
-            Err(Error::msg("No content to read."))
         }
 
-        fn path_exists(&mut self, path: &Path) -> bool {
-            let call = ReceivedCall {
-                affected_path: path.to_path_buf(),
-                variant: ReceivedCallVariant::DoesPathExist,
-            };
+        fn path_exists(&self, path: &Path) -> bool {
+            self.add_call(path, ReceivedCallVariant::DoesPathExist);
 
-            self.received_calls.push(call);
-
-            let expected_call_option = self.expected_calls.get(self.received_calls.len() - 1);
-
-            if let Some(expected_call) = expected_call_option {
-                if let ExpectedCallVariant::PathExists(answer) = &expected_call.variant {
-                    return *answer;
-                }
+            if let ExpectedCallVariant::PathExists(answer) = self.get_expected_call() {
+                return answer;
             }
 
             panic!("No mocked return value given for call.");
@@ -285,6 +268,7 @@ pub mod mock {
         pub variant: ExpectedCallVariant,
     }
 
+    #[derive(Clone)]
     pub enum ExpectedCallVariant {
         CreateFile,
         DeleteFile,

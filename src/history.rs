@@ -13,7 +13,7 @@ pub struct RepositoryHistory {
 }
 
 impl RepositoryHistory {
-    pub fn from_file<FS: Fs>(fs: &mut FS, file: &mut FS::File) -> Result<RepositoryHistory> {
+    pub fn from_file<FS: Fs>(fs: &FS, file: &mut FS::File) -> Result<RepositoryHistory> {
         let buffer = fs
             .read_from_file(file)
             .context("Failed reading repository history.")?;
@@ -22,7 +22,7 @@ impl RepositoryHistory {
         repository_history.context("Corrupted repository history.")
     }
 
-    pub fn write_to_file<FS: Fs>(&self, fs: &mut FS, file: &mut FS::File) -> anyhow::Result<()> {
+    pub fn write_to_file<FS: Fs>(&self, fs: &FS, file: &mut FS::File) -> anyhow::Result<()> {
         let encoded: Vec<u8> = serde_json::to_vec(self)?;
         fs.write_to_file(file, encoded)?;
         Ok(())
@@ -58,7 +58,7 @@ pub struct FileHistory {
 }
 
 impl FileHistory {
-    pub fn from_file<FS: Fs>(fs: &mut FS, file: &mut FS::File) -> Result<FileHistory> {
+    pub fn from_file<FS: Fs>(fs: &FS, file: &mut FS::File) -> Result<FileHistory> {
         let buffer = fs
             .read_from_file(file)
             .context("Failed reading file history.")?;
@@ -67,7 +67,7 @@ impl FileHistory {
         file_history.context("Corrupted file history.")
     }
 
-    pub fn write_to_file<FS: Fs>(&self, fs: &mut FS, file: &mut FS::File) -> Result<()> {
+    pub fn write_to_file<FS: Fs>(&self, fs: &FS, file: &mut FS::File) -> Result<()> {
         let encoded: Vec<u8> = serde_json::to_vec(self)?;
         fs.write_to_file(file, encoded)?;
         Ok(())

@@ -18,7 +18,7 @@ impl Locations {
         return self.ka_path.join("index");
     }
 
-    pub fn get_repository_files<FS: Fs>(&self, fs: &mut FS) -> Result<Vec<FileState>, Error> {
+    pub fn get_repository_files<FS: Fs>(&self, fs: &FS) -> Result<Vec<FileState>, Error> {
         let working_entries = fs
             .read_directory(&self.repository_path)
             .context("Failed reading working file entries.")?
@@ -30,12 +30,12 @@ impl Locations {
             .context("Failed reading history file entries.")?;
 
         let working_files = Self::walk_directory(fs, working_entries, &|entry| {
-            FileState::from_working(self, &entry.path()).ok()
+            FileState::from_working(fs, self, &entry.path()).ok()
         })?;
 
         let deleted_files = Self::walk_directory(fs, history_entries, &|entry| {
             let file_path = entry.path();
-            let file = FileState::from_history(self, &file_path).ok()?;
+            let file = FileState::from_history(fs, self, &file_path).ok()?;
             match file {
                 FileState::Deleted { .. } => Some(file),
                 FileState::Tracked { .. } => None,
@@ -60,7 +60,7 @@ impl Locations {
     }
 
     fn walk_directory<FS: Fs>(
-        fs: &mut FS,
+        fs: &FS,
         directory: Vec<FS::Entry>,
         filter_map: &dyn Fn(&FS::Entry) -> Option<FileState>,
     ) -> Result<Vec<FileState>> {
@@ -100,9 +100,13 @@ pub enum FileState {
 }
 
 impl FileState {
-    pub fn from_history(locations: &Locations, history_file_path: &Path) -> Result<Self> {
+    pub fn from_history<FS: Fs>(
+        fs: &FS,
+        locations: &Locations,
+        history_file_path: &Path,
+    ) -> Result<Self> {
         let working_path = locations.working_from_history(history_file_path)?;
-        Ok(if !working_path.exists() {
+        Ok(if !fs.path_exists(&working_path) {
             FileState::Deleted(FileDeleted {
                 history_path: history_file_path.to_path_buf(),
             })
@@ -114,11 +118,14 @@ impl FileState {
         })
     }
 
-    pub fn from_working(locations: &Locations, working_file_path: &Path) -> Result<Self> {
+    pub fn from_working<FS: Fs>(
+        fs: &FS,
+        locations: &Locations,
+        working_file_path: &Path,
+    ) -> Result<Self> {
         let history_path = locations.history_from_working(working_file_path)?;
-        // FIXME: Path::exists wouldn't work with Fs abstraction.
         // TODO: Think whether abstracting Path would be needed for Fs abstraction.
-        Ok(if !history_path.exists() {
+        Ok(if !fs.path_exists(&history_path) {
             FileState::Untracked(FileUntracked {
                 path: working_file_path.to_path_buf(),
             })
@@ -144,15 +151,11 @@ pub struct FileDeleted {
 }
 
 impl FileDeleted {
-    pub fn load_history_file<FS: Fs>(&self, fs: &mut FS) -> Result<FS::File> {
+    pub fn load_history_file<FS: Fs>(&self, fs: &FS) -> Result<FS::File> {
         fs.open_writable_file(&self.history_path)
     }
 
-    pub fn create_working_file<FS: Fs>(
-        &self,
-        fs: &mut FS,
-        locations: &Locations,
-    ) -> Result<FS::File> {
+    pub fn create_working_file<FS: Fs>(&self, fs: &FS, locations: &Locations) -> Result<FS::File> {
         let working_path = locations.working_from_history(&self.history_path)?;
         fs.create_file(&working_path)
     }
@@ -163,15 +166,11 @@ pub struct FileUntracked {
 }
 
 impl FileUntracked {
-    pub fn load_file<FS: Fs>(&self, fs: &mut FS) -> Result<FS::File> {
+    pub fn load_file<FS: Fs>(&self, fs: &FS) -> Result<FS::File> {
         fs.open_readable_file(&self.path)
     }
 
-    pub fn create_history_file<FS: Fs>(
-        &self,
-        fs: &mut FS,
-        locations: &Locations,
-    ) -> Result<FS::File> {
+    pub fn create_history_file<FS: Fs>(&self, fs: &FS, locations: &Locations) -> Result<FS::File> {
         let history_path = locations.history_from_working(&self.path)?;
         Ok(fs.create_file(&history_path)?)
     }
@@ -183,15 +182,15 @@ pub struct FileTracked {
 }
 
 impl FileTracked {
-    pub fn load_history_file<FS: Fs>(&self, fs: &mut FS) -> Result<FS::File> {
+    pub fn load_history_file<FS: Fs>(&self, fs: &FS) -> Result<FS::File> {
         fs.open_writable_file(&self.history_path)
     }
 
-    pub fn load_working_file<FS: Fs>(&self, fs: &mut FS) -> Result<FS::File> {
+    pub fn load_working_file<FS: Fs>(&self, fs: &FS) -> Result<FS::File> {
         fs.open_readable_file(&self.working_path)
     }
 
-    pub fn create_working_file<FS: Fs>(&self, fs: &mut FS) -> Result<FS::File> {
+    pub fn create_working_file<FS: Fs>(&self, fs: &FS) -> Result<FS::File> {
         fs.create_file(&self.working_path)
     }
 }

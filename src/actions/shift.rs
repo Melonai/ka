@@ -10,7 +10,7 @@ use crate::{
 
 use super::ActionOptions;
 
-pub fn shift(command_options: ActionOptions, fs: &mut impl Fs, new_cursor: usize) -> Result<()> {
+pub fn shift(command_options: ActionOptions, fs: &impl Fs, new_cursor: usize) -> Result<()> {
     let locations = Locations::from(&command_options);
 
     let repository_index_path = locations.get_repository_index_path();
@@ -38,7 +38,7 @@ pub fn shift(command_options: ActionOptions, fs: &mut impl Fs, new_cursor: usize
             acc
         })
         .iter()
-        .map(|path| FileState::from_working(&locations, path))
+        .map(|path| FileState::from_working(fs, &locations, path))
         .collect();
 
     for state in affected_files_by_shift? {

@@ -12,19 +12,19 @@ fn main() {
     let options = ActionOptions::from_path("./repo");
     //let options = ActionOptions::from_pwd().expect("Could not get current path.");
 
-    let mut filesystem = FsImpl {};
+    let filesystem = FsImpl {};
 
     match command {
         "create" => {
-            create(options, &mut filesystem).expect("Failed executing Create action.");
+            create(options, &filesystem).expect("Failed executing Create action.");
         }
         "update" => {
-            update(options, &mut filesystem).expect("Failed executing Update action.");
+            update(options, &filesystem).expect("Failed executing Update action.");
         }
         "shift" => {
             let new_cursor: usize = args[2].as_str().parse().expect("Invalid cursor.");
 
-            shift(options, &mut filesystem, new_cursor).expect("Failed executing Shift actions.");
+            shift(options, &filesystem, new_cursor).expect("Failed executing Shift actions.");
         }
         _ => panic!("Unknown command: {}", command),
     }

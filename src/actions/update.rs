@@ -11,7 +11,7 @@ use crate::{
 
 use super::ActionOptions;
 
-pub fn update(command_options: ActionOptions, fs: &mut impl Fs) -> Result<()> {
+pub fn update(command_options: ActionOptions, fs: &impl Fs) -> Result<()> {
     let timestamp = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)?
         .as_secs();
@@ -51,7 +51,7 @@ pub fn update(command_options: ActionOptions, fs: &mut impl Fs) -> Result<()> {
 }
 
 fn get_new_history_for_file<FS: Fs>(
-    fs: &mut FS,
+    fs: &FS,
     cursor: usize,
     file_state: &FileState,
     locations: &Locations,
