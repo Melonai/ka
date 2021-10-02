@@ -5,23 +5,23 @@ use std::{
     path::Path,
 };
 
-pub trait FileSystem {
-    type F;
+pub trait Fs {
+    type File;
 
-    fn create_file(&mut self, path: &Path) -> Result<Self::F>;
-    fn open_readable_file(&mut self, path: &Path) -> Result<Self::F>;
-    fn open_writable_file(&mut self, path: &Path) -> Result<Self::F>;
+    fn create_file(&mut self, path: &Path) -> Result<Self::File>;
+    fn open_readable_file(&mut self, path: &Path) -> Result<Self::File>;
+    fn open_writable_file(&mut self, path: &Path) -> Result<Self::File>;
 
-    fn write_to_file(&mut self, file: &mut Self::F, buffer: Vec<u8>) -> Result<()>;
-    fn read_from_file(&mut self, file: &mut Self::F) -> Result<Vec<u8>>;
+    fn write_to_file(&mut self, file: &mut Self::File, buffer: Vec<u8>) -> Result<()>;
+    fn read_from_file(&mut self, file: &mut Self::File) -> Result<Vec<u8>>;
 }
 
-pub struct FileSystemImpl {}
+pub struct FsImpl {}
 
-impl FileSystem for FileSystemImpl {
-    type F = File;
+impl Fs for FsImpl {
+    type File = File;
 
-    fn create_file(&mut self, path: &Path) -> Result<Self::F> {
+    fn create_file(&mut self, path: &Path) -> Result<Self::File> {
         OpenOptions::new()
             .create(true)
             .read(true)
@@ -30,12 +30,12 @@ impl FileSystem for FileSystemImpl {
             .with_context(|| format!("Failed creating '{}'.", path.display()))
     }
 
-    fn open_readable_file(&mut self, path: &Path) -> Result<Self::F> {
+    fn open_readable_file(&mut self, path: &Path) -> Result<Self::File> {
         File::open(path)
             .with_context(|| format!("Failed opening '{}' for reading.", path.display()))
     }
 
-    fn open_writable_file(&mut self, path: &Path) -> Result<Self::F> {
+    fn open_writable_file(&mut self, path: &Path) -> Result<Self::File> {
         OpenOptions::new()
             .read(true)
             .write(true)
@@ -48,14 +48,14 @@ impl FileSystem for FileSystemImpl {
             })
     }
 
-    fn write_to_file(&mut self, file: &mut Self::F, buffer: Vec<u8>) -> Result<()> {
+    fn write_to_file(&mut self, file: &mut Self::File, buffer: Vec<u8>) -> Result<()> {
         file.rewind()?;
         file.set_len(0)?;
         file.write_all(&buffer)?;
         Ok(())
     }
 
-    fn read_from_file(&mut self, file: &mut Self::F) -> Result<Vec<u8>> {
+    fn read_from_file(&mut self, file: &mut Self::File) -> Result<Vec<u8>> {
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer)?;
         Ok(buffer)
@@ -67,26 +67,26 @@ pub mod mock {
     use std::path::{Path, PathBuf};
     use anyhow::{Error, Result};
 
-    use super::FileSystem;
+    use super::Fs;
 
-    pub struct FileSystemMock {
+    pub struct FsMock {
         expected_calls: Vec<ExpectedCall>,
         received_calls: Vec<ReceivedCall>,
     }
 
-    impl FileSystemMock {
+    impl FsMock {
         pub fn new() -> Self {
-            FileSystemMock {
+            FsMock {
                 expected_calls: Vec::new(),
                 received_calls: Vec::new(),
             }
         }
     }
 
-    impl FileSystem for FileSystemMock {
-        type F = FileMock;
+    impl Fs for FsMock {
+        type File = FileMock;
 
-        fn create_file(&mut self, path: &Path) -> Result<Self::F> {
+        fn create_file(&mut self, path: &Path) -> Result<Self::File> {
             let call = ReceivedCall {
                 affected_file: path.to_path_buf(),
                 variant: ReceivedCallVariant::FileCreated,
@@ -100,7 +100,7 @@ pub mod mock {
             })
         }
 
-        fn open_readable_file(&mut self, path: &Path) -> Result<Self::F> {
+        fn open_readable_file(&mut self, path: &Path) -> Result<Self::File> {
             let call = ReceivedCall {
                 affected_file: path.to_path_buf(),
                 variant: ReceivedCallVariant::ReadableFileOpened,
@@ -114,7 +114,7 @@ pub mod mock {
             })
         }
 
-        fn open_writable_file(&mut self, path: &Path) -> Result<Self::F> {
+        fn open_writable_file(&mut self, path: &Path) -> Result<Self::File> {
             let call = ReceivedCall {
                 affected_file: path.to_path_buf(),
                 variant: ReceivedCallVariant::WritableFileOpened,
@@ -128,7 +128,7 @@ pub mod mock {
             })
         }
 
-        fn write_to_file(&mut self, file: &mut Self::F, buffer: Vec<u8>) -> Result<()> {
+        fn write_to_file(&mut self, file: &mut Self::File, buffer: Vec<u8>) -> Result<()> {
             let call = ReceivedCall {
                 affected_file: file.path.clone(),
                 variant: ReceivedCallVariant::FileWritten {
@@ -143,7 +143,7 @@ pub mod mock {
             Ok(())
         }
 
-        fn read_from_file(&mut self, file: &mut Self::F) -> Result<Vec<u8>> {
+        fn read_from_file(&mut self, file: &mut Self::File) -> Result<Vec<u8>> {
             let call = ReceivedCall {
                 affected_file: file.path.clone(),
                 variant: ReceivedCallVariant::FileRead,
