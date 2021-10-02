@@ -1,12 +1,11 @@
-use std::{
-    fs::{self, DirEntry, File, OpenOptions},
-    io,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Error, Result};
 
-use crate::actions::ActionOptions;
+use crate::{
+    actions::ActionOptions,
+    filesystem::{Fs, FsEntry},
+};
 
 pub struct Locations {
     pub repository_path: PathBuf,
@@ -15,25 +14,26 @@ pub struct Locations {
 }
 
 impl Locations {
-    pub fn get_repository_index(&self) -> PathBuf {
-        return self.ka_path.join("index")
+    pub fn get_repository_index_path(&self) -> PathBuf {
+        return self.ka_path.join("index");
     }
 
-    pub fn get_repository_files(&self) -> Result<Vec<FileState>, Error> {
-        let working_entries = fs::read_dir(&self.repository_path)
+    pub fn get_repository_files<FS: Fs>(&self, fs: &mut FS) -> Result<Vec<FileState>, Error> {
+        let working_entries = fs
+            .read_directory(&self.repository_path)
             .context("Failed reading working file entries.")?
-            .filter(|res| {
-                res.as_ref()
-                    .map_or(true, |entry| entry.path() != self.ka_path)
-            });
-        let history_entries =
-            fs::read_dir(&self.ka_files_path).context("Failed reading history file entries.")?;
+            .into_iter()
+            .filter(|e| e.path() == self.ka_path)
+            .collect();
+        let history_entries = fs
+            .read_directory(&self.ka_files_path)
+            .context("Failed reading history file entries.")?;
 
-        let working_files = Self::walk_directory(working_entries, &|entry| {
+        let working_files = Self::walk_directory(fs, working_entries, &|entry| {
             FileState::from_working(self, &entry.path()).ok()
         })?;
 
-        let deleted_files = Self::walk_directory(history_entries, &|entry| {
+        let deleted_files = Self::walk_directory(fs, history_entries, &|entry| {
             let file_path = entry.path();
             let file = FileState::from_history(self, &file_path).ok()?;
             match file {
@@ -59,20 +59,19 @@ impl Locations {
         Ok(self.ka_files_path.join(raw_path))
     }
 
-    fn walk_directory(
-        directory: impl Iterator<Item = io::Result<DirEntry>>,
-        filter_map: &dyn Fn(DirEntry) -> Option<FileState>,
+    fn walk_directory<FS: Fs>(
+        fs: &mut FS,
+        directory: Vec<FS::Entry>,
+        filter_map: &dyn Fn(&FS::Entry) -> Option<FileState>,
     ) -> Result<Vec<FileState>> {
         let mut entries = Vec::new();
 
-        for res in directory {
-            let entry = res?;
-            let file_type = entry.file_type()?;
-            if file_type.is_dir() {
-                let nested_directory = fs::read_dir(entry.path())?;
-                let nested_files = Self::walk_directory(nested_directory, filter_map)?;
+        for entry in directory {
+            if entry.is_directory()? {
+                let nested_directory = fs.read_directory(&entry.path())?;
+                let nested_files = Self::walk_directory(fs, nested_directory, filter_map)?;
                 entries.extend(nested_files);
-            } else if let Some(states) = filter_map(entry) {
+            } else if let Some(states) = filter_map(&entry) {
                 entries.push(states);
             }
         }
@@ -117,6 +116,8 @@ impl FileState {
 
     pub fn from_working(locations: &Locations, working_file_path: &Path) -> Result<Self> {
         let history_path = locations.history_from_working(working_file_path)?;
+        // FIXME: Path::exists wouldn't work with Fs abstraction.
+        // TODO: Think whether abstracting Path would be needed for Fs abstraction.
         Ok(if !history_path.exists() {
             FileState::Untracked(FileUntracked {
                 path: working_file_path.to_path_buf(),
@@ -143,17 +144,17 @@ pub struct FileDeleted {
 }
 
 impl FileDeleted {
-    pub fn load_history_file(&self) -> io::Result<File> {
-        OpenOptions::new()
-            .write(true)
-            .read(true)
-            .open(&self.history_path)
+    pub fn load_history_file<FS: Fs>(&self, fs: &mut FS) -> Result<FS::File> {
+        fs.open_writable_file(&self.history_path)
     }
 
-    pub fn create_working_file(&self, locations: &Locations) -> Result<File> {
-        Ok(File::create(
-            locations.working_from_history(&self.history_path)?,
-        )?)
+    pub fn create_working_file<FS: Fs>(
+        &self,
+        fs: &mut FS,
+        locations: &Locations,
+    ) -> Result<FS::File> {
+        let working_path = locations.working_from_history(&self.history_path)?;
+        fs.create_file(&working_path)
     }
 }
 
@@ -162,20 +163,17 @@ pub struct FileUntracked {
 }
 
 impl FileUntracked {
-    pub fn load_file(&self) -> io::Result<File> {
-        OpenOptions::new().read(true).open(&self.path)
+    pub fn load_file<FS: Fs>(&self, fs: &mut FS) -> Result<FS::File> {
+        fs.open_readable_file(&self.path)
     }
 
-    pub fn create_history_file(&self, locations: &Locations) -> Result<File> {
+    pub fn create_history_file<FS: Fs>(
+        &self,
+        fs: &mut FS,
+        locations: &Locations,
+    ) -> Result<FS::File> {
         let history_path = locations.history_from_working(&self.path)?;
-
-        if let Some(parent_path) = history_path.parent() {
-            if !parent_path.exists() {
-                fs::create_dir_all(parent_path)?;
-            }
-        }
-
-        Ok(File::create(history_path)?)
+        Ok(fs.create_file(&history_path)?)
     }
 }
 
@@ -185,18 +183,15 @@ pub struct FileTracked {
 }
 
 impl FileTracked {
-    pub fn load_history_file(&self) -> io::Result<File> {
-        OpenOptions::new()
-            .write(true)
-            .read(true)
-            .open(&self.history_path)
+    pub fn load_history_file<FS: Fs>(&self, fs: &mut FS) -> Result<FS::File> {
+        fs.open_writable_file(&self.history_path)
     }
 
-    pub fn load_working_file(&self) -> io::Result<File> {
-        File::open(&self.working_path)
+    pub fn load_working_file<FS: Fs>(&self, fs: &mut FS) -> Result<FS::File> {
+        fs.open_readable_file(&self.working_path)
     }
 
-    pub fn create_working_file(&self) -> io::Result<File> {
-        File::create(&self.working_path)
+    pub fn create_working_file<FS: Fs>(&self, fs: &mut FS) -> Result<FS::File> {
+        fs.create_file(&self.working_path)
     }
 }

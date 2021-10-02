@@ -1,6 +1,6 @@
 pub mod actions;
+pub mod filesystem;
 
-mod history;
 mod diff;
 mod files;
-mod filesystem;
+mod history;

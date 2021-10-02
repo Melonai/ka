@@ -1,26 +1,23 @@
-use std::fs::{self, File};
-
+use crate::{actions::update, files::Locations, filesystem::Fs, history::RepositoryHistory};
 use anyhow::Result;
-
-use crate::{actions::update, files::Locations, history::RepositoryHistory};
 
 use super::ActionOptions;
 
-pub fn create(command_options: ActionOptions) -> Result<()> {
+pub fn create(command_options: ActionOptions, fs: &mut impl Fs) -> Result<()> {
     let locations = Locations::from(&command_options);
+    // FIXME: Re-add old repository deletion.
+    // if locations.ka_path.exists() {
+    //     fs::remove_dir_all(locations.ka_path.as_path())?;
+    // }
 
-    if locations.ka_path.exists() {
-        fs::remove_dir_all(locations.ka_path.as_path())?;
-    }
+    // fs::create_dir(&locations.ka_path)?;
+    // fs::create_dir(&locations.ka_files_path)?;
 
-    fs::create_dir(&locations.ka_path)?;
-    fs::create_dir(&locations.ka_files_path)?;
-
-    let mut index_file = File::create(locations.get_repository_index())?;
+    let mut index_file = fs.create_file(&locations.get_repository_index_path())?;
     let empty_history = RepositoryHistory::default();
-    empty_history.write_to_file(&mut index_file)?;
+    empty_history.write_to_file(fs, &mut index_file)?;
 
-    update(command_options)?;
+    update(command_options, fs)?;
 
     Ok(())
 }

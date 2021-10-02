@@ -1,14 +1,10 @@
-use std::{
-    fs::File,
-    io::{Read, Seek, Write},
-    path::PathBuf,
-};
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
 use anyhow::{Context, Result};
 
-use crate::diff::ContentChange;
+use crate::{diff::ContentChange, filesystem::Fs};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RepositoryHistory {
@@ -17,20 +13,18 @@ pub struct RepositoryHistory {
 }
 
 impl RepositoryHistory {
-    pub fn from_file(file: &mut File) -> Result<RepositoryHistory> {
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer)
+    pub fn from_file<FS: Fs>(fs: &mut FS, file: &mut FS::File) -> Result<RepositoryHistory> {
+        let buffer = fs
+            .read_from_file(file)
             .context("Failed reading repository history.")?;
 
         let repository_history = serde_json::from_slice::<RepositoryHistory>(&buffer);
         repository_history.context("Corrupted repository history.")
     }
 
-    pub fn write_to_file(&self, file: &mut File) -> anyhow::Result<()> {
+    pub fn write_to_file<FS: Fs>(&self, fs: &mut FS, file: &mut FS::File) -> anyhow::Result<()> {
         let encoded: Vec<u8> = serde_json::to_vec(self)?;
-        file.rewind()?;
-        file.set_len(0)?;
-        file.write_all(encoded.as_ref())?;
+        fs.write_to_file(file, encoded)?;
         Ok(())
     }
 
@@ -64,20 +58,18 @@ pub struct FileHistory {
 }
 
 impl FileHistory {
-    pub fn from_file(file: &mut File) -> Result<FileHistory> {
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer)
+    pub fn from_file<FS: Fs>(fs: &mut FS, file: &mut FS::File) -> Result<FileHistory> {
+        let buffer = fs
+            .read_from_file(file)
             .context("Failed reading file history.")?;
 
         let file_history = serde_json::from_slice::<FileHistory>(&buffer);
         file_history.context("Corrupted file history.")
     }
 
-    pub fn write_to_file(&self, file: &mut File) -> anyhow::Result<()> {
+    pub fn write_to_file<FS: Fs>(&self, fs: &mut FS, file: &mut FS::File) -> Result<()> {
         let encoded: Vec<u8> = serde_json::to_vec(self)?;
-        file.rewind()?;
-        file.set_len(0)?;
-        file.write_all(encoded.as_ref())?;
+        fs.write_to_file(file, encoded)?;
         Ok(())
     }
 

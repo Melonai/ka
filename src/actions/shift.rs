@@ -1,29 +1,26 @@
-use std::{
-    collections::HashSet,
-    fs::{self, OpenOptions},
-    io::{Seek, Write},
-};
+use std::collections::HashSet;
 
 use anyhow::Result;
 
 use crate::{
     files::{FileState, Locations},
+    filesystem::Fs,
     history::{FileHistory, RepositoryHistory},
 };
 
 use super::ActionOptions;
 
-pub fn shift(command_options: ActionOptions, new_cursor: usize) -> Result<()> {
+pub fn shift(command_options: ActionOptions, fs: &mut impl Fs, new_cursor: usize) -> Result<()> {
     let locations = Locations::from(&command_options);
 
-    let repository_index_path = locations.get_repository_index();
-    let mut repository_index_file = OpenOptions::new().write(true).open(repository_index_path)?;
-    let mut repository_history = RepositoryHistory::from_file(&mut repository_index_file)?;
+    let repository_index_path = locations.get_repository_index_path();
+    let mut repository_index_file = fs.open_writable_file(&repository_index_path)?;
+    let mut repository_history = RepositoryHistory::from_file(fs, &mut repository_index_file)?;
 
     let old_cursor = repository_history.cursor;
 
     repository_history.cursor = new_cursor;
-    repository_history.write_to_file(&mut repository_index_file)?;
+    repository_history.write_to_file(fs, &mut repository_index_file)?;
 
     let changes_between_cursors = if old_cursor < new_cursor {
         old_cursor..new_cursor
@@ -47,32 +44,27 @@ pub fn shift(command_options: ActionOptions, new_cursor: usize) -> Result<()> {
     for state in affected_files_by_shift? {
         match state {
             FileState::Tracked(tracked) => {
-                let mut history_file = tracked.load_history_file()?;
+                let mut history_file = tracked.load_history_file(fs)?;
 
-                let file_history = FileHistory::from_file(&mut history_file)?;
+                let file_history = FileHistory::from_file(fs, &mut history_file)?;
 
                 if file_history.is_file_deleted(new_cursor) {
-                    fs::remove_file(tracked.working_path)?;
+                    fs.delete_file(&tracked.working_path)?;
                 } else {
                     let new_content = file_history.get_content(new_cursor);
-                    let mut working_file = tracked.create_working_file()?;
-
-                    working_file.rewind()?;
-                    working_file.set_len(0)?;
-
-                    working_file.write_all(&new_content)?;
+                    let mut working_file = tracked.create_working_file(fs)?;
+                    fs.write_to_file(&mut working_file, new_content)?;
                 }
             }
             FileState::Deleted(deleted) => {
-                let mut history_file = deleted.load_history_file()?;
+                let mut history_file = deleted.load_history_file(fs)?;
 
-                let file_history = FileHistory::from_file(&mut history_file)?;
+                let file_history = FileHistory::from_file(fs, &mut history_file)?;
 
                 if !file_history.is_file_deleted(new_cursor) {
-                    let mut new_working_file = deleted.create_working_file(&locations)?;
+                    let mut new_working_file = deleted.create_working_file(fs, &locations)?;
                     let new_content = file_history.get_content(new_cursor);
-
-                    new_working_file.write_all(&new_content)?;
+                    fs.write_to_file(&mut new_working_file, new_content)?;
                 }
             }
             // TODO: What do we do with untracked files on a shift? Delete them?

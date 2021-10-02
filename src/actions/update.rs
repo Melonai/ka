@@ -1,43 +1,38 @@
-use std::{
-    fs::{File, OpenOptions},
-    io::Read,
-    time::SystemTime,
-};
+use std::time::SystemTime;
 
 use anyhow::{Context, Result};
 
 use crate::{
     diff::ContentChange,
     files::{FileState, Locations},
+    filesystem::Fs,
     history::{FileChange, FileChangeVariant, FileHistory, RepositoryChange, RepositoryHistory},
 };
 
 use super::ActionOptions;
 
-pub fn update(command_options: ActionOptions) -> Result<()> {
+pub fn update(command_options: ActionOptions, fs: &mut impl Fs) -> Result<()> {
     let timestamp = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)?
         .as_secs();
 
     let locations = Locations::from(&command_options);
 
-    let repository_index_path = locations.get_repository_index();
-    let mut repository_index_file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(repository_index_path)?;
-    let mut repository_history = RepositoryHistory::from_file(&mut repository_index_file)?;
+    let repository_index_path = locations.get_repository_index_path();
+    let mut repository_index_file = fs.open_writable_file(&repository_index_path)?;
+    let mut repository_history = RepositoryHistory::from_file(fs, &mut repository_index_file)?;
 
     let entries = locations
-        .get_repository_files()
+        .get_repository_files(fs)
         .context("Could not traverse files.")?;
 
     let mut affected_files = Vec::new();
 
     for state in entries {
-        let changed_file = get_new_history_for_file(repository_history.cursor, &state, &locations)?;
+        let changed_file =
+            get_new_history_for_file(fs, repository_history.cursor, &state, &locations)?;
         if let Some((mut history_file, new_file_history)) = changed_file {
-            new_file_history.write_to_file(&mut history_file)?;
+            new_file_history.write_to_file(fs, &mut history_file)?;
             affected_files.push(state.get_working_path(&locations)?);
         }
     }
@@ -49,21 +44,22 @@ pub fn update(command_options: ActionOptions) -> Result<()> {
         });
         repository_history.cursor += 1;
 
-        repository_history.write_to_file(&mut repository_index_file)?;
+        repository_history.write_to_file(fs, &mut repository_index_file)?;
     }
 
     Ok(())
 }
 
-fn get_new_history_for_file(
+fn get_new_history_for_file<FS: Fs>(
+    fs: &mut FS,
     cursor: usize,
     file_state: &FileState,
     locations: &Locations,
-) -> Result<Option<(File, FileHistory)>> {
+) -> Result<Option<(FS::File, FileHistory)>> {
     match file_state {
         FileState::Deleted(deleted) => {
-            let mut history_file = deleted.load_history_file()?;
-            let file_history = FileHistory::from_file(&mut history_file)?;
+            let mut history_file = deleted.load_history_file(fs)?;
+            let file_history = FileHistory::from_file(fs, &mut history_file)?;
             if !file_history.is_file_deleted(cursor) {
                 let mut new_history = file_history;
                 new_history.add_change(FileChange {
@@ -76,10 +72,9 @@ fn get_new_history_for_file(
             }
         }
         FileState::Untracked(untracked) => {
-            let mut file = untracked.load_file()?;
+            let mut file = untracked.load_file(fs)?;
 
-            let mut file_content = Vec::new();
-            file.read_to_end(&mut file_content)?;
+            let file_content = fs.read_from_file(&mut file)?;
 
             let change = FileChange {
                 change_index: cursor + 1,
@@ -93,19 +88,17 @@ fn get_new_history_for_file(
             new_history.add_change(change);
 
             Ok(Some((
-                untracked.create_history_file(locations)?,
+                untracked.create_history_file(fs, locations)?,
                 new_history,
             )))
         }
         FileState::Tracked(tracked) => {
-            let mut history_file = tracked.load_history_file()?;
-            let mut working_file = tracked.load_working_file()?;
+            let mut history_file = tracked.load_history_file(fs)?;
+            let mut working_file = tracked.load_working_file(fs)?;
 
-            let file_history = FileHistory::from_file(&mut history_file)?;
+            let file_history = FileHistory::from_file(fs, &mut history_file)?;
 
-            let mut new_content = Vec::new();
-            working_file.read_to_end(&mut new_content)?;
-
+            let new_content = fs.read_from_file(&mut working_file)?;
             let old_content = file_history.get_content(cursor);
 
             let changes = ContentChange::diff(&old_content, &new_content);

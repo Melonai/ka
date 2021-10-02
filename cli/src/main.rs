@@ -1,6 +1,9 @@
 use std::env;
 
-use ka::actions::{create, shift, update, ActionOptions};
+use ka::{
+    actions::{create, shift, update, ActionOptions},
+    filesystem::FsImpl,
+};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -9,17 +12,19 @@ fn main() {
     let options = ActionOptions::from_path("./repo");
     //let options = ActionOptions::from_pwd().expect("Could not get current path.");
 
+    let mut filesystem = FsImpl {};
+
     match command {
         "create" => {
-            create(options).expect("Failed executing Create action.");
+            create(options, &mut filesystem).expect("Failed executing Create action.");
         }
         "update" => {
-            update(options).expect("Failed executing Update action.");
+            update(options, &mut filesystem).expect("Failed executing Update action.");
         }
         "shift" => {
             let new_cursor: usize = args[2].as_str().parse().expect("Invalid cursor.");
 
-            shift(options, new_cursor).expect("Failed executing Shift actions.");
+            shift(options, &mut filesystem, new_cursor).expect("Failed executing Shift actions.");
         }
         _ => panic!("Unknown command: {}", command),
     }
