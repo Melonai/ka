@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, time::SystemTime};
 
 use ka::{
     actions::{create, shift, update, ActionOptions},
@@ -14,12 +14,17 @@ fn main() {
 
     let filesystem = FsImpl {};
 
+    let timestamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("Could not get current system time.")
+        .as_secs();
+
     match command {
         "create" => {
-            create(options, &filesystem).expect("Failed executing Create action.");
+            create(options, &filesystem, timestamp).expect("Failed executing Create action.");
         }
         "update" => {
-            update(options, &filesystem).expect("Failed executing Update action.");
+            update(options, &filesystem, timestamp).expect("Failed executing Update action.");
         }
         "shift" => {
             let new_cursor: usize = args[2].as_str().parse().expect("Invalid cursor.");

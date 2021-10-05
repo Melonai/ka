@@ -13,17 +13,24 @@ pub struct RepositoryHistory {
 }
 
 impl RepositoryHistory {
-    pub fn from_file<FS: Fs>(fs: &FS, file: &mut FS::File) -> Result<RepositoryHistory> {
+    pub fn encode(&self) -> Result<Vec<u8>> {
+        serde_json::to_vec(self).context("Failed encoding repository history.")
+    }
+
+    pub fn decode(buffer: &[u8]) -> Result<Self> {
+        serde_json::from_slice::<Self>(buffer).context("Failed decoding repository history.")
+    }
+
+    pub fn from_file<FS: Fs>(fs: &FS, file: &mut FS::File) -> Result<Self> {
         let buffer = fs
             .read_from_file(file)
             .context("Failed reading repository history.")?;
 
-        let repository_history = serde_json::from_slice::<RepositoryHistory>(&buffer);
-        repository_history.context("Corrupted repository history.")
+        Self::decode(&buffer)
     }
 
-    pub fn write_to_file<FS: Fs>(&self, fs: &FS, file: &mut FS::File) -> anyhow::Result<()> {
-        let encoded: Vec<u8> = serde_json::to_vec(self)?;
+    pub fn write_to_file<FS: Fs>(&self, fs: &FS, file: &mut FS::File) -> Result<()> {
+        let encoded: Vec<u8> = self.encode()?;
         fs.write_to_file(file, encoded)?;
         Ok(())
     }
@@ -58,17 +65,24 @@ pub struct FileHistory {
 }
 
 impl FileHistory {
-    pub fn from_file<FS: Fs>(fs: &FS, file: &mut FS::File) -> Result<FileHistory> {
+    pub fn encode(&self) -> Result<Vec<u8>> {
+        serde_json::to_vec(self).context("Failed encoding file history.")
+    }
+
+    pub fn decode(buffer: &[u8]) -> Result<Self> {
+        serde_json::from_slice::<Self>(buffer).context("Failed decoding file history.")
+    }
+
+    pub fn from_file<FS: Fs>(fs: &FS, file: &mut FS::File) -> Result<Self> {
         let buffer = fs
             .read_from_file(file)
             .context("Failed reading file history.")?;
 
-        let file_history = serde_json::from_slice::<FileHistory>(&buffer);
-        file_history.context("Corrupted file history.")
+        Self::decode(&buffer)
     }
 
     pub fn write_to_file<FS: Fs>(&self, fs: &FS, file: &mut FS::File) -> Result<()> {
-        let encoded: Vec<u8> = serde_json::to_vec(self)?;
+        let encoded: Vec<u8> = self.encode()?;
         fs.write_to_file(file, encoded)?;
         Ok(())
     }

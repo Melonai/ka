@@ -23,7 +23,7 @@ impl Locations {
             .read_directory(&self.repository_path)
             .context("Failed reading working file entries.")?
             .into_iter()
-            .filter(|e| e.path() == self.ka_path)
+            .filter(|e| e.path() != self.ka_path)
             .collect();
         let history_entries = fs
             .read_directory(&self.ka_files_path)

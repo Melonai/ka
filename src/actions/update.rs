@@ -1,5 +1,3 @@
-use std::time::SystemTime;
-
 use anyhow::{Context, Result};
 
 use crate::{
@@ -11,11 +9,7 @@ use crate::{
 
 use super::ActionOptions;
 
-pub fn update(command_options: ActionOptions, fs: &impl Fs) -> Result<()> {
-    let timestamp = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)?
-        .as_secs();
-
+pub fn update(command_options: ActionOptions, fs: &impl Fs, timestamp: u64) -> Result<()> {
     let locations = Locations::from(&command_options);
 
     let repository_index_path = locations.get_repository_index_path();

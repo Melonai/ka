@@ -129,6 +129,12 @@ pub mod mock {
 
     use super::{Fs, FsEntry};
 
+    // TODO: This testing style is very imperative as we have to consider every single
+    // call that happens in an action. (See actions::create::tests)
+    // Could we instead emulate a fake in-memory file system for FsMock, requiring only
+    // an input state and an output state, with no knowledge what happens in between.
+    // That would greatly simplify making tests.
+
     pub struct FsMock {
         state: Arc<Mutex<FsMockState>>,
     }
@@ -158,10 +164,26 @@ pub mod mock {
         pub fn assert_calls(self) {
             let state = self.state.lock().expect("File system lock poisoned.");
 
-            let calls = state.received_calls.iter().zip(state.expected_calls.iter());
+            let longest_call_amount = state.received_calls.len().max(state.expected_calls.len());
 
-            for (received, expected) in calls {
-                expected.assert_received(received)
+            for call_index in 0..longest_call_amount {
+                let expected_option = state.expected_calls.get(call_index);
+                let received_option = state.received_calls.get(call_index);
+
+                let expected_call = expected_option.unwrap_or_else(|| {
+                    panic!(
+                        "Received unexpected call: '{:?}'.",
+                        received_option.unwrap()
+                    )
+                });
+                let received_call = received_option.unwrap_or_else(|| {
+                    panic!(
+                        "Expected call: '{:?}', which was not received.",
+                        expected_option.unwrap()
+                    )
+                });
+
+                expected_call.assert_received(received_call);
             }
         }
 
@@ -324,6 +346,15 @@ pub mod mock {
     pub struct EntryMock {
         path: PathBuf,
         is_directory: bool,
+    }
+
+    impl EntryMock {
+        pub fn new(path: &Path, is_directory: bool) -> Self {
+            EntryMock {
+                path: path.to_path_buf(),
+                is_directory,
+            }
+        }
     }
 
     impl FsEntry for EntryMock {
@@ -496,6 +527,22 @@ mod tests {
         )]);
 
         fs_mock.delete_file(&path).unwrap();
+        fs_mock.assert_calls();
+    }
+
+    #[test]
+    #[should_panic]
+    fn mock_unequal_calls() {
+        let fs_mock = FsMock::new();
+
+        let path = Path::new("file").to_path_buf();
+
+        fs_mock.set_expected_calls(vec![
+            ExpectedCall::new(&path, ExpectedCallVariant::CreateFile),
+            ExpectedCall::new(&path, ExpectedCallVariant::DeleteFile),
+        ]);
+
+        fs_mock.create_file(&path).unwrap();
         fs_mock.assert_calls();
     }
 }
