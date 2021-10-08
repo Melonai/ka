@@ -121,34 +121,23 @@ impl FsEntry for DirEntry {
 #[allow(dead_code)]
 #[cfg(test)]
 pub mod mock {
-    use anyhow::Result;
+    use anyhow::{anyhow, Result};
     use std::{
+        collections::{hash_map, HashMap},
         path::{Path, PathBuf},
-        sync::{Arc, Mutex},
+        sync::{Arc, Mutex, MutexGuard},
     };
 
     use super::{Fs, FsEntry};
 
-    // TODO: This testing style is very imperative as we have to consider every single
-    // call that happens in an action. (See actions::create::tests)
-    // Could we instead emulate a fake in-memory file system for FsMock, requiring only
-    // an input state and an output state, with no knowledge what happens in between.
-    // That would greatly simplify making tests.
-
     pub struct FsMock {
-        state: Arc<Mutex<FsMockState>>,
-    }
-
-    struct FsMockState {
-        expected_calls: Vec<ExpectedCall>,
-        received_calls: Vec<ReceivedCall>,
+        state: Arc<Mutex<FsState>>,
     }
 
     impl FsMock {
         pub fn new() -> Self {
-            let state = FsMockState {
-                expected_calls: Vec::new(),
-                received_calls: Vec::new(),
+            let state = FsState {
+                entries: HashMap::new(),
             };
 
             FsMock {
@@ -156,393 +145,378 @@ pub mod mock {
             }
         }
 
-        pub fn set_expected_calls(&self, calls: Vec<ExpectedCall>) {
-            let mut state = self.state.lock().expect("File system mock lock poisoned.");
-            state.expected_calls = calls;
+        pub fn set_state(&mut self, new_state: FsState) {
+            let mut state = self.state.lock().expect("FsMock state lock poisoned.");
+            *state = new_state;
         }
 
-        pub fn assert_calls(self) {
-            let state = self.state.lock().expect("File system lock poisoned.");
-
-            let longest_call_amount = state.received_calls.len().max(state.expected_calls.len());
-
-            for call_index in 0..longest_call_amount {
-                let expected_option = state.expected_calls.get(call_index);
-                let received_option = state.received_calls.get(call_index);
-
-                let expected_call = expected_option.unwrap_or_else(|| {
-                    panic!(
-                        "Received unexpected call: '{:?}'.",
-                        received_option.unwrap()
-                    )
-                });
-                let received_call = received_option.unwrap_or_else(|| {
-                    panic!(
-                        "Expected call: '{:?}', which was not received.",
-                        expected_option.unwrap()
-                    )
-                });
-
-                expected_call.assert_received(received_call);
-            }
+        pub fn assert_match(&self, _expected_state: FsState) {
+            todo!()
         }
 
-        fn add_call(&self, call: ReceivedCall) {
-            let mut state = self.state.lock().expect("File system mock lock poisoned.");
-            state.received_calls.push(call);
-        }
-
-        fn get_expected_call(&self) -> Option<ExpectedCallVariant> {
-            let state = self.state.lock().expect("File system lock poisoned.");
-
-            state
-                .expected_calls
-                .get(state.received_calls.len())
-                .map(|e| e.variant.clone())
+        fn state(&self) -> MutexGuard<FsState> {
+            self.state.lock().expect("FsMock state lock poisoned.")
         }
     }
 
-    impl Fs for FsMock {
+    impl<'fs> Fs for FsMock {
         type File = FileMock;
+
         type Entry = EntryMock;
 
         fn create_file(&self, path: &Path) -> Result<Self::File> {
-            let call = ReceivedCall::new(path, ReceivedCallVariant::FileCreated);
-            self.add_call(call);
-
-            Ok(FileMock {
-                path: path.to_path_buf(),
-                writable: true,
-            })
+            let mut state = self.state();
+            if let Some(file) = state.get_or_create_file(path) {
+                Ok(file)
+            } else {
+                if state.is_directory(path) {
+                    Err(anyhow!(
+                        "The file '{}' can't be opened or created, because it is a directory.",
+                        path.display()
+                    ))
+                } else {
+                    Err(anyhow!(
+                        "The file '{}' can't be opened or created, because one of it's parent paths which have to be created is occupied.",
+                        path.display()
+                    ))
+                }
+            }
         }
 
         fn delete_file(&self, path: &Path) -> Result<()> {
-            let call = ReceivedCall::new(path, ReceivedCallVariant::FileDeleted);
-            self.add_call(call);
-
-            Ok(())
+            let mut state = self.state();
+            if state.delete_if_file(path) {
+                Ok(())
+            } else {
+                if state.is_directory(path) {
+                    Err(anyhow!(
+                        "The file '{}' can't be deleted because it is a directory.",
+                        path.display()
+                    ))
+                } else {
+                    Err(anyhow!(
+                        "The file '{}' can't be deleted because it doesn't exist.",
+                        path.display()
+                    ))
+                }
+            }
         }
 
         fn open_readable_file(&self, path: &Path) -> Result<Self::File> {
-            let call = ReceivedCall::new(path, ReceivedCallVariant::ReadableFileOpened);
-            self.add_call(call);
-
-            Ok(FileMock {
-                path: path.to_path_buf(),
-                writable: false,
-            })
+            let state = self.state();
+            if let Some(file) = state.get_file_for_reading(path) {
+                Ok(file)
+            } else {
+                if state.is_directory(path) {
+                    Err(anyhow!(
+                        "The file '{}' can't be opened for reading because it is a directory.",
+                        path.display()
+                    ))
+                } else {
+                    Err(anyhow!(
+                        "The file '{}' can't be opened for reading because it doesn't exist.",
+                        path.display()
+                    ))
+                }
+            }
         }
 
         fn open_writable_file(&self, path: &Path) -> Result<Self::File> {
-            let call = ReceivedCall::new(path, ReceivedCallVariant::WritableFileOpened);
-            self.add_call(call);
-
-            Ok(FileMock {
-                path: path.to_path_buf(),
-                writable: true,
-            })
+            let state = self.state();
+            if let Some(file) = state.get_file(path) {
+                Ok(file)
+            } else {
+                if state.is_directory(path) {
+                    Err(anyhow!("The file '{}' can't be opened for reading and writing because it is a directory.", path.display()))
+                } else {
+                    Err(anyhow!("The file '{}' can't be opened for reading and writing because it doesn't exist.", path.display()))
+                }
+            }
         }
 
         fn create_directory(&self, path: &Path) -> Result<()> {
-            let call = ReceivedCall::new(path, ReceivedCallVariant::DirectoryCreated);
-            self.add_call(call);
-
-            Ok(())
+            let mut state = self.state();
+            if state.create_directory(path) {
+                Ok(())
+            } else {
+                if state.is_directory(path) {
+                    Err(anyhow!(
+                        "The directory '{}' can't be created because it already exists.",
+                        path.display()
+                    ))
+                } else if state.is_file(path) {
+                    Err(anyhow!("The directory '{}' can't be created because there is a file with the same path.", path.display()))
+                } else {
+                    Err(anyhow!(
+                        "The directory '{}' can't be opened or created, because one of it's parent paths which have to be created is occupied.",
+                        path.display()
+                    ))
+                }
+            }
         }
 
         fn read_directory(&self, path: &Path) -> Result<Vec<Self::Entry>> {
-            let call = ReceivedCall::new(path, ReceivedCallVariant::DirectoryRead);
-
-            let return_value = if let Some(expected_call) = self.get_expected_call() {
-                if let ExpectedCallVariant::ReadDirectory { returned } = expected_call {
-                    Ok(returned.to_vec())
-                } else {
-                    panic!(
-                        "Received unexpected call: {:?}, expected call: {:?}.",
-                        call, expected_call
-                    );
-                }
+            let state = self.state();
+            if let Some(entries) = state.get_entries_if_directory(path) {
+                Ok(entries)
             } else {
-                panic!(
-                    "Received unexpected call, with no expected call to compare it to: {:?}.",
-                    call
-                );
-            };
-
-            self.add_call(call);
-
-            return_value
+                if state.is_file(path) {
+                    Err(anyhow!(
+                        "The directory '{}' can't be read because it is a file.",
+                        path.display()
+                    ))
+                } else {
+                    Err(anyhow!(
+                        "The directory '{}' can't be read because it doesn't exist.",
+                        path.display()
+                    ))
+                }
+            }
         }
 
         fn delete_directory(&self, path: &Path) -> Result<()> {
-            let call = ReceivedCall::new(path, ReceivedCallVariant::DirectoryDeleted);
-            self.add_call(call);
-
-            Ok(())
+            let mut state = self.state();
+            if state.delete_if_directory(path) {
+                Ok(())
+            } else {
+                if state.is_file(path) {
+                    Err(anyhow!(
+                        "The directory '{}' can't be deleted because it is a file.",
+                        path.display()
+                    ))
+                } else {
+                    Err(anyhow!(
+                        "The directory '{}' can't be deleted because it doesn't exist.",
+                        path.display()
+                    ))
+                }
+            }
         }
 
         fn write_to_file(&self, file: &mut Self::File, buffer: Vec<u8>) -> Result<()> {
-            let call = ReceivedCall::new(
-                &file.path,
-                ReceivedCallVariant::FileWritten { received: buffer },
-            );
-            self.add_call(call);
-
-            // TODO: Check whether file was opened with write flag.
-
-            Ok(())
+            let mut state = self.state();
+            if file.writable {
+                if state.write_to_if_file(&file.path, buffer) {
+                    Ok(())
+                } else {
+                    if state.is_directory(&file.path) {
+                        Err(anyhow!(
+                            "The file '{}' can't be written to because it is a directory.",
+                            file.path.display()
+                        ))
+                    } else {
+                        Err(anyhow!(
+                            "The file '{}' can't be written to because it doesn't exist.",
+                            file.path.display()
+                        ))
+                    }
+                }
+            } else {
+                Err(anyhow!(
+                    "The file '{}' is not writable.",
+                    file.path.display()
+                ))
+            }
         }
 
         fn read_from_file(&self, file: &mut Self::File) -> Result<Vec<u8>> {
-            let call = ReceivedCall::new(&file.path, ReceivedCallVariant::FileRead);
-
-            let return_value = if let Some(expected_call) = self.get_expected_call() {
-                if let ExpectedCallVariant::ReadFile { returned } = expected_call {
-                    Ok(returned.clone())
-                } else {
-                    panic!(
-                        "Received unexpected call: {:?}, expected call: {:?}.",
-                        call, expected_call
-                    );
-                }
+            let state = self.state();
+            if let Some(content) = state.get_content_if_file(&file.path) {
+                Ok(content)
             } else {
-                panic!(
-                    "Received unexpected call, with no expected call to compare it to: {:?}.",
-                    call
-                );
-            };
-
-            self.add_call(call);
-
-            return_value
+                if state.is_directory(&file.path) {
+                    Err(anyhow!(
+                        "The file '{}' can't be read from because it is a directory.",
+                        file.path.display()
+                    ))
+                } else {
+                    Err(anyhow!(
+                        "The file '{}' can't be read from because it doesn't exist.",
+                        file.path.display()
+                    ))
+                }
+            }
         }
 
         fn path_exists(&self, path: &Path) -> bool {
-            let call = ReceivedCall::new(path, ReceivedCallVariant::DoesPathExist);
-
-            let return_value = if let Some(expected_call) = self.get_expected_call() {
-                if let ExpectedCallVariant::PathExists(answer) = expected_call {
-                    answer
-                } else {
-                    panic!(
-                        "Received unexpected call: {:?}, expected call: {:?}.",
-                        call, expected_call
-                    );
-                }
-            } else {
-                panic!(
-                    "Received unexpected call, with no expected call to compare it to: {:?}.",
-                    call
-                );
-            };
-
-            self.add_call(call);
-
-            return_value
+            self.state().exists(path)
         }
     }
 
-    #[derive(Debug, Clone)]
-    pub struct EntryMock {
+    pub struct FsState {
+        entries: HashMap<PathBuf, EntryMock>,
+    }
+
+    impl FsState {
+        fn get_or_create_file(&mut self, path: &Path) -> Option<FileMock> {
+            if let Some(parent) = path.parent() {
+                if !self.is_directory(parent) && !self.create_directory(path) {
+                    return None;
+                }
+            }
+
+            let path_buf = path.to_path_buf();
+            match self.entries.entry(path_buf.clone()) {
+                hash_map::Entry::Occupied(occupied) => match occupied.get() {
+                    EntryMock::File(file) => Some(file.clone()),
+                    _ => None,
+                },
+                hash_map::Entry::Vacant(vacant) => {
+                    let file = FileMock {
+                        path: path_buf,
+                        writable: true,
+                        content: Vec::new(),
+                    };
+                    vacant.insert(EntryMock::File(file.clone()));
+                    Some(file)
+                }
+            }
+        }
+
+        fn delete_if_file(&mut self, path: &Path) -> bool {
+            if self.is_file(path) {
+                self.entries.remove(path).is_some()
+            } else {
+                false
+            }
+        }
+
+        fn get_file(&self, path: &Path) -> Option<FileMock> {
+            match self.entries.get(path) {
+                Some(entry) => match entry {
+                    EntryMock::File(file) => Some(file.clone()),
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
+
+        fn get_file_for_reading(&self, path: &Path) -> Option<FileMock> {
+            self.get_file(path).map(|mut f| {
+                f.writable = false;
+                f
+            })
+        }
+
+        fn get_content_if_file(&self, path: &Path) -> Option<Vec<u8>> {
+            self.get_file(path).map(|f| f.content)
+        }
+
+        fn write_to_if_file(&mut self, path: &Path, buffer: Vec<u8>) -> bool {
+            match self.entries.get_mut(path) {
+                Some(entry) => match entry {
+                    EntryMock::File(file) => {
+                        file.content = buffer;
+                        true
+                    }
+                    _ => false,
+                },
+                _ => false,
+            }
+        }
+
+        fn create_directory(&mut self, path: &Path) -> bool {
+            if let Some(parent) = path.parent() {
+                if !self.is_directory(parent) && !self.create_directory(path) {
+                    return false;
+                }
+            }
+
+            let path_buf = path.to_path_buf();
+            match self.entries.entry(path_buf.clone()) {
+                hash_map::Entry::Vacant(vacant) => {
+                    vacant.insert(EntryMock::Dir { path: path_buf });
+                    true
+                }
+                _ => false,
+            }
+        }
+
+        fn delete_if_directory(&mut self, path: &Path) -> bool {
+            if self.is_directory(path) {
+                self.entries.remove(path).is_some()
+            } else {
+                false
+            }
+        }
+
+        fn get_entries_if_directory(&self, path: &Path) -> Option<Vec<EntryMock>> {
+            if self.is_directory(path) {
+                let directory_entries = self
+                    .entries
+                    .iter()
+                    .filter(|&(path, _)| {
+                        if let Some(parent) = path.parent() {
+                            parent == path
+                        } else {
+                            false
+                        }
+                    })
+                    .map(|(_, entry)| entry.clone())
+                    .collect();
+
+                Some(directory_entries)
+            } else {
+                None
+            }
+        }
+
+        fn is_file(&self, path: &Path) -> bool {
+            self.entries
+                .get(path)
+                .map_or(false, |e| matches!(e, EntryMock::File(_)))
+        }
+
+        fn is_directory(&self, path: &Path) -> bool {
+            self.entries
+                .get(path)
+                .map_or(false, |e| matches!(e, EntryMock::Dir { .. }))
+        }
+
+        fn exists(&self, path: &Path) -> bool {
+            self.entries.contains_key(path)
+        }
+    }
+
+    #[derive(Clone)]
+    pub struct FileMock {
         path: PathBuf,
-        is_directory: bool,
+        writable: bool,
+        content: Vec<u8>,
+    }
+
+    #[derive(Clone)]
+    pub enum EntryMock {
+        File(FileMock),
+        Dir { path: PathBuf },
     }
 
     impl EntryMock {
-        pub fn new(path: &Path, is_directory: bool) -> Self {
-            EntryMock {
-                path: path.to_path_buf(),
-                is_directory,
+        pub fn file(path_str: &str, content: &[u8]) -> Self {
+            EntryMock::File(FileMock {
+                path: Path::new(path_str).to_path_buf(),
+                writable: true,
+                content: content.to_vec(),
+            })
+        }
+
+        pub fn dir(path_str: &str) -> Self {
+            EntryMock::Dir {
+                path: Path::new(path_str).to_path_buf(),
             }
         }
     }
 
     impl FsEntry for EntryMock {
         fn path(&self) -> PathBuf {
-            self.path.clone()
+            match self {
+                EntryMock::File(FileMock { path, .. }) => path.clone(),
+                EntryMock::Dir { path } => path.clone(),
+            }
         }
 
         fn is_directory(&self) -> Result<bool> {
-            Ok(self.is_directory)
+            Ok(matches!(self, EntryMock::Dir { .. }))
         }
-    }
-
-    pub struct FileMock {
-        path: PathBuf,
-        writable: bool,
-    }
-
-    // TODO: Do we need ways to return errors?
-    #[derive(Debug)]
-    pub struct ExpectedCall {
-        pub affected_path: PathBuf,
-        pub variant: ExpectedCallVariant,
-    }
-
-    impl ExpectedCall {
-        pub fn new(path: &Path, variant: ExpectedCallVariant) -> Self {
-            ExpectedCall {
-                affected_path: path.to_path_buf(),
-                variant,
-            }
-        }
-
-        fn assert_received(&self, rec: &ReceivedCall) {
-            if self.affected_path == rec.affected_path {
-                use ExpectedCallVariant as E;
-                use ReceivedCallVariant as R;
-
-                let e = &self.variant;
-
-                let equal = match rec.variant {
-                    R::FileCreated => matches!(e, E::CreateFile),
-                    R::FileDeleted => matches!(e, E::DeleteFile),
-                    R::ReadableFileOpened => matches!(e, E::OpenReadableFile),
-                    R::WritableFileOpened => matches!(e, E::OpenWritableFile),
-                    R::DirectoryCreated => matches!(e, E::CreateDirectory),
-                    R::DirectoryRead => matches!(e, E::ReadDirectory { .. }),
-                    R::DirectoryDeleted => matches!(e, E::DeleteDirectory),
-                    R::FileRead => matches!(e, E::ReadFile { .. }),
-                    R::FileWritten { ref received } => {
-                        if let E::WriteToFile { expected } = e {
-                            expected == received
-                        } else {
-                            false
-                        }
-                    }
-                    R::DoesPathExist => matches!(e, E::PathExists(_)),
-                };
-
-                if equal {
-                    return;
-                }
-            }
-
-            panic!(
-                "
-                Expected call does not equal received call.
-                Expected: {:?}
-                Recevied: {:?}
-                ",
-                self, rec
-            );
-        }
-    }
-
-    #[derive(Debug, Clone)]
-    pub enum ExpectedCallVariant {
-        CreateFile,
-        DeleteFile,
-        OpenReadableFile,
-        OpenWritableFile,
-        CreateDirectory,
-        ReadDirectory { returned: Vec<EntryMock> },
-        DeleteDirectory,
-        ReadFile { returned: Vec<u8> },
-        WriteToFile { expected: Vec<u8> },
-        PathExists(bool),
-    }
-
-    #[derive(Debug)]
-    struct ReceivedCall {
-        affected_path: PathBuf,
-        variant: ReceivedCallVariant,
-    }
-
-    impl ReceivedCall {
-        fn new(path: &Path, variant: ReceivedCallVariant) -> Self {
-            ReceivedCall {
-                affected_path: path.to_path_buf(),
-                variant,
-            }
-        }
-    }
-
-    #[derive(Debug)]
-    enum ReceivedCallVariant {
-        FileCreated,
-        FileDeleted,
-        ReadableFileOpened,
-        WritableFileOpened,
-        DirectoryCreated,
-        DirectoryRead,
-        DirectoryDeleted,
-        FileRead,
-        FileWritten { received: Vec<u8> },
-        DoesPathExist,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::Path;
-
-    use crate::filesystem::{
-        mock::{ExpectedCall, ExpectedCallVariant},
-        Fs,
-    };
-
-    use super::mock::FsMock;
-
-    #[test]
-    fn mock_empty() {
-        let fs_mock = FsMock::new();
-        fs_mock.assert_calls();
-    }
-
-    #[test]
-    fn mock_file_basic() {
-        let fs_mock = FsMock::new();
-
-        let path = Path::new("file").to_path_buf();
-
-        fs_mock.set_expected_calls(vec![
-            ExpectedCall::new(&path, ExpectedCallVariant::CreateFile),
-            ExpectedCall::new(
-                &path,
-                ExpectedCallVariant::ReadFile {
-                    returned: vec![1, 2, 3],
-                },
-            ),
-        ]);
-
-        let mut file = fs_mock.create_file(&path).unwrap();
-        let received_content = fs_mock.read_from_file(&mut file).unwrap();
-
-        assert_eq!(received_content, vec![1, 2, 3]);
-
-        fs_mock.assert_calls();
-    }
-
-    #[test]
-    #[should_panic]
-    fn mock_unexpected_call() {
-        let fs_mock = FsMock::new();
-
-        let path = Path::new("file").to_path_buf();
-
-        fs_mock.set_expected_calls(vec![ExpectedCall::new(
-            &path,
-            ExpectedCallVariant::CreateFile,
-        )]);
-
-        fs_mock.delete_file(&path).unwrap();
-        fs_mock.assert_calls();
-    }
-
-    #[test]
-    #[should_panic]
-    fn mock_unequal_calls() {
-        let fs_mock = FsMock::new();
-
-        let path = Path::new("file").to_path_buf();
-
-        fs_mock.set_expected_calls(vec![
-            ExpectedCall::new(&path, ExpectedCallVariant::CreateFile),
-            ExpectedCall::new(&path, ExpectedCallVariant::DeleteFile),
-        ]);
-
-        fs_mock.create_file(&path).unwrap();
-        fs_mock.assert_calls();
     }
 }
