@@ -430,7 +430,10 @@ pub mod mock {
 
         fn get_or_create_file(&mut self, path: &Path) -> Option<FileMock> {
             if let Some(parent) = path.parent() {
-                if !self.is_directory(parent) && !self.create_directory(path) {
+                if !parent.as_os_str().is_empty()
+                    && !self.is_directory(parent)
+                    && !self.create_directory(parent)
+                {
                     return None;
                 }
             }
@@ -497,7 +500,7 @@ pub mod mock {
 
         fn create_directory(&mut self, path: &Path) -> bool {
             if let Some(parent) = path.parent() {
-                if !self.is_directory(parent) && !self.create_directory(path) {
+                if !parent.as_os_str().is_empty() && !self.is_directory(parent) && !self.create_directory(parent) {
                     return false;
                 }
             }
@@ -548,6 +551,11 @@ pub mod mock {
         }
 
         fn is_directory(&self, path: &Path) -> bool {
+            // We assume these exist.
+            if path.as_os_str() == "." || path.as_os_str() == "/" {
+                return true;
+            }
+
             self.entries
                 .get(path)
                 .map_or(false, |e| matches!(e, EntryMock::Dir { .. }))
@@ -598,5 +606,50 @@ pub mod mock {
         fn is_directory(&self) -> Result<bool> {
             Ok(matches!(self, EntryMock::Dir { .. }))
         }
+    }
+
+    mod tests {
+        use std::path::Path;
+
+        use crate::filesystem::{mock::EntryMock, Fs};
+
+        use super::{FsMock, FsState};
+
+        #[test]
+        fn empty() {
+            let mock = FsMock::new();
+            mock.assert_match(FsState::new(Vec::new()))
+        }
+
+        #[test]
+        fn basic() {
+            let mock = FsMock::new();
+
+            let mut file = mock.create_file(Path::new("./folder/file")).unwrap();
+            mock.write_to_file(&mut file, "content".as_bytes().into())
+                .unwrap();
+
+            mock.assert_match(FsState::new(vec![
+                EntryMock::dir("./folder"),
+                EntryMock::file("./folder/file", "content".as_bytes()),
+            ]))
+        }
+
+        #[test]
+        fn deletion() {
+            let mock = FsMock::new();
+
+            mock.create_file(Path::new("./folder/file_to_delete")).unwrap();
+            mock.create_directory(Path::new("./dir_to_delete")).unwrap();
+            mock.delete_file(Path::new("./folder/file_to_delete")).unwrap();
+            mock.delete_directory(Path::new("./dir_to_delete")).unwrap();
+
+            mock.assert_match(FsState::new(vec![
+                EntryMock::dir("./folder"),
+            ]))
+        }
+
+        // TODO: Add more test coverage for FsMock, as it has to be as robust as possible
+        // to ensure that tests depending on it are sane.
     }
 }
