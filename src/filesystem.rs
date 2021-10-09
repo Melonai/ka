@@ -123,7 +123,7 @@ impl FsEntry for DirEntry {
 pub mod mock {
     use anyhow::{anyhow, Result};
     use std::{
-        collections::{hash_map, HashMap},
+        collections::{hash_map, HashMap, HashSet},
         path::{Path, PathBuf},
         sync::{Arc, Mutex, MutexGuard},
     };
@@ -150,8 +150,14 @@ pub mod mock {
             *state = new_state;
         }
 
-        pub fn assert_match(&self, _expected_state: FsState) {
-            todo!()
+        pub fn assert_match(&self, expected_state: FsState) {
+            let diff = expected_state.diff(&self.state());
+            if !diff.is_empty() {
+                panic!(
+                    "Mock filesystem state does not match the expected state:\n {}",
+                    diff.join("\n")
+                )
+            }
         }
 
         fn state(&self) -> MutexGuard<FsState> {
@@ -348,6 +354,80 @@ pub mod mock {
     }
 
     impl FsState {
+        pub fn new(entries: Vec<EntryMock>) -> Self {
+            let mut map = HashMap::new();
+            for entry in entries {
+                map.insert(entry.path(), entry);
+            }
+
+            Self { entries: map }
+        }
+
+        fn diff(&self, other: &Self) -> Vec<String> {
+            let mut differences = Vec::new();
+
+            let mut keys = HashSet::new();
+            keys.extend(self.entries.keys());
+            keys.extend(other.entries.keys());
+
+            for path in keys {
+                match (self.entries.get(path), other.entries.get(path)) {
+                    (Some(own_entry), Some(other_entry)) => match own_entry {
+                        EntryMock::File(own_file) => {
+                            if let EntryMock::File(other_file) = other_entry {
+                                if own_file.content != other_file.content {
+                                    differences.push(format!(
+                                        "The contents of the file '{}' do not match.
+                                    Excepted: {:?},
+                                    Received: {:?}",
+                                        path.display(),
+                                        own_file.content,
+                                        other_file.content
+                                    ))
+                                }
+                            } else {
+                                differences.push(format!(
+                                    "Expected file at '{}', instead found a directory.",
+                                    path.display(),
+                                ))
+                            }
+                        }
+                        EntryMock::Dir { .. } => {
+                            if let EntryMock::File(_) = other_entry {
+                                differences.push(format!(
+                                    "Expected directory at '{}', instead found a file.",
+                                    path.display(),
+                                ))
+                            }
+                        }
+                    },
+                    (None, Some(missing_entry_for_own)) => {
+                        differences.push(match missing_entry_for_own {
+                            EntryMock::File(_) => {
+                                format!("Found unexpected file at '{}'.", path.display())
+                            }
+                            EntryMock::Dir { .. } => {
+                                format!("Found unexpected directory at '{}'.", path.display())
+                            }
+                        })
+                    }
+                    (Some(missing_entry_for_other), None) => {
+                        differences.push(match missing_entry_for_other {
+                            EntryMock::File(_) => {
+                                format!("Expected file at '{}'.", path.display())
+                            }
+                            EntryMock::Dir { .. } => {
+                                format!("Expected directory at '{}'.", path.display())
+                            }
+                        })
+                    }
+                    _ => unreachable!(),
+                }
+            }
+
+            differences
+        }
+
         fn get_or_create_file(&mut self, path: &Path) -> Option<FileMock> {
             if let Some(parent) = path.parent() {
                 if !self.is_directory(parent) && !self.create_directory(path) {
