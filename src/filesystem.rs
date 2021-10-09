@@ -528,8 +528,8 @@ pub mod mock {
                 let directory_entries = self
                     .entries
                     .iter()
-                    .filter(|&(path, _)| {
-                        if let Some(parent) = path.parent() {
+                    .filter(|&(p, _)| {
+                        if let Some(parent) = p.parent() {
                             parent == path
                         } else {
                             false
@@ -647,6 +647,32 @@ pub mod mock {
             mock.assert_match(FsState::new(vec![
                 EntryMock::dir("./folder"),
             ]))
+        }
+
+        #[test]
+        fn directory_traversal() {
+            let mock = FsMock::new();
+
+            mock.create_file(Path::new("./folder/file")).unwrap();
+            mock.create_file(Path::new("./folder/another_file")).unwrap();
+            mock.create_file(Path::new("./folder/nested/file_too_deep")).unwrap();
+
+            let entries = mock.read_directory(Path::new("./folder")).unwrap();
+
+            // Diffing is easier when we do it from FsState, so we use it here for the test,
+            // even though it isn't an actual filesystem state, which is sort of hacky.
+            let expected_read_files = FsState::new(vec![
+                EntryMock::file("./folder/file", &vec![]),
+                EntryMock::file("./folder/another_file", &vec![]),
+                EntryMock::dir("./folder/nested"),
+            ]);
+
+            let actual_read_files = FsState::new(entries);
+
+            let diff = expected_read_files.diff(&actual_read_files);
+            if !diff.is_empty() {
+                panic!("{}", diff.join("\n"));
+            }
         }
 
         // TODO: Add more test coverage for FsMock, as it has to be as robust as possible
