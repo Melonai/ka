@@ -26,7 +26,14 @@ pub fn create(command_options: ActionOptions, fs: &impl Fs, timestamp: u64) -> R
 mod tests {
     use std::path::Path;
 
-    use crate::{actions::ActionOptions, diff::ContentChange, filesystem::mock::{EntryMock, FsMock, FsState}, history::{FileChange, FileChangeVariant, FileHistory, RepositoryChange, RepositoryHistory}};
+    use crate::{
+        actions::ActionOptions,
+        diff::ContentChange,
+        filesystem::mock::{EntryMock, FsMock, FsState},
+        history::{
+            FileChange, FileChangeVariant, FileHistory, RepositoryChange, RepositoryHistory,
+        },
+    };
 
     use super::create;
 
@@ -37,7 +44,7 @@ mod tests {
         let options = ActionOptions::from_path(".");
 
         let expected_index = RepositoryHistory::default().encode().unwrap();
-        
+
         create(options, &fs_mock, now).expect("Action failed.");
 
         fs_mock.assert_match(FsState::new(vec![
@@ -76,15 +83,15 @@ mod tests {
             history.encode().unwrap()
         };
 
-        fs_mock.set_state(FsState::new(vec![
-            EntryMock::file("./test", &vec![1, 2, 3])
-        ]));
+        fs_mock.set_state(FsState::new(vec![EntryMock::file(
+            "./test",
+            &vec![1, 2, 3],
+        )]));
 
         create(options, &fs_mock, now).expect("Action failed.");
 
         fs_mock.assert_match(FsState::new(vec![
             EntryMock::file("./test", &vec![1, 2, 3]),
-
             EntryMock::dir("./.ka"),
             EntryMock::file("./.ka/index", &expected_index),
             EntryMock::dir("./.ka/files"),

@@ -500,7 +500,10 @@ pub mod mock {
 
         fn create_directory(&mut self, path: &Path) -> bool {
             if let Some(parent) = path.parent() {
-                if !parent.as_os_str().is_empty() && !self.is_directory(parent) && !self.create_directory(parent) {
+                if !parent.as_os_str().is_empty()
+                    && !self.is_directory(parent)
+                    && !self.create_directory(parent)
+                {
                     return false;
                 }
             }
@@ -639,14 +642,14 @@ pub mod mock {
         fn deletion() {
             let mock = FsMock::new();
 
-            mock.create_file(Path::new("./folder/file_to_delete")).unwrap();
+            mock.create_file(Path::new("./folder/file_to_delete"))
+                .unwrap();
             mock.create_directory(Path::new("./dir_to_delete")).unwrap();
-            mock.delete_file(Path::new("./folder/file_to_delete")).unwrap();
+            mock.delete_file(Path::new("./folder/file_to_delete"))
+                .unwrap();
             mock.delete_directory(Path::new("./dir_to_delete")).unwrap();
 
-            mock.assert_match(FsState::new(vec![
-                EntryMock::dir("./folder"),
-            ]))
+            mock.assert_match(FsState::new(vec![EntryMock::dir("./folder")]))
         }
 
         #[test]
@@ -654,8 +657,10 @@ pub mod mock {
             let mock = FsMock::new();
 
             mock.create_file(Path::new("./folder/file")).unwrap();
-            mock.create_file(Path::new("./folder/another_file")).unwrap();
-            mock.create_file(Path::new("./folder/nested/file_too_deep")).unwrap();
+            mock.create_file(Path::new("./folder/another_file"))
+                .unwrap();
+            mock.create_file(Path::new("./folder/nested/file_too_deep"))
+                .unwrap();
 
             let entries = mock.read_directory(Path::new("./folder")).unwrap();
 

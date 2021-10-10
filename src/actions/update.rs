@@ -97,13 +97,13 @@ fn get_new_history_for_file<FS: Fs>(
 
             let changes = ContentChange::diff(&old_content, &new_content);
 
-            if !changes.is_empty() {                
+            if !changes.is_empty() {
                 let mut new_history = file_history;
                 new_history.add_change(FileChange {
                     change_index: cursor + 1,
                     variant: FileChangeVariant::Updated(changes),
                 });
-                
+
                 Ok(Some((history_file, new_history)))
             } else {
                 Ok(None)
