@@ -31,7 +31,7 @@ pub fn update(command_options: ActionOptions, fs: &impl Fs, timestamp: u64) -> R
         }
     }
 
-    if affected_files.len() > 0 {
+    if !affected_files.is_empty() {
         repository_history.add_change(RepositoryChange {
             affected_files,
             timestamp,

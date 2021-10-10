@@ -15,7 +15,7 @@ pub struct Locations {
 
 impl Locations {
     pub fn get_repository_index_path(&self) -> PathBuf {
-        return self.ka_path.join("index");
+        self.ka_path.join("index")
     }
 
     pub fn get_repository_files<FS: Fs>(&self, fs: &FS) -> Result<Vec<FileState>, Error> {
@@ -172,7 +172,7 @@ impl FileUntracked {
 
     pub fn create_history_file<FS: Fs>(&self, fs: &FS, locations: &Locations) -> Result<FS::File> {
         let history_path = locations.history_from_working(&self.path)?;
-        Ok(fs.create_file(&history_path)?)
+        fs.create_file(&history_path)
     }
 }
 
