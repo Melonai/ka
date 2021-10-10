@@ -111,3 +111,105 @@ fn get_new_history_for_file<FS: Fs>(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use crate::{
+        actions::{create, update, ActionOptions},
+        diff::ContentChange,
+        filesystem::mock::{EntryMock, FsMock, FsState},
+        history::{
+            FileChange, FileChangeVariant, FileHistory, RepositoryChange, RepositoryHistory,
+        },
+    };
+
+    #[test]
+    fn no_update_if_no_change() {
+        let now = 0xC0FFEE;
+        let mut fs_mock = FsMock::new();
+
+        fs_mock.set_state(FsState::new(vec![EntryMock::file("./test", &[1, 2, 3])]));
+
+        // We create the initial Fs state by running the Create action.
+        create(ActionOptions::from_path("."), &fs_mock, now)
+            .expect("Creating expected state failed.");
+        let state = fs_mock.get_state();
+
+        update(ActionOptions::from_path("."), &fs_mock, now + 1).expect("Action failed.");
+
+        // No change should have happened.
+        fs_mock.assert_match(state);
+    }
+
+    #[test]
+    fn selective_update() {
+        let now = 0xC0FFEE;
+        let mut fs_mock = FsMock::new();
+        let options = ActionOptions::from_path(".");
+
+        let mut repo_history = RepositoryHistory::default();
+
+        repo_history.add_change(RepositoryChange {
+            affected_files: vec![
+                Path::new("./changed_file").into(),
+                Path::new("./unchanged_file").into(),
+            ],
+            timestamp: now,
+        });
+        repo_history.cursor = 1;
+        let initial_index = repo_history.encode().unwrap();
+
+        repo_history.add_change(RepositoryChange {
+            affected_files: vec![Path::new("./changed_file").into()],
+            timestamp: now + 1,
+        });
+        repo_history.cursor = 2;
+        let updated_index = repo_history.encode().unwrap();
+
+        let mut file_history = FileHistory::default();
+
+        file_history.add_change(FileChange {
+            change_index: 1,
+            variant: FileChangeVariant::Updated(vec![ContentChange::Inserted {
+                at: 0,
+                new_content: vec![1, 2, 3],
+            }]),
+        });
+        let initial_file_history = file_history.encode().unwrap();
+
+        file_history.add_change(FileChange {
+            change_index: 2,
+            variant: FileChangeVariant::Updated(vec![ContentChange::Inserted {
+                at: 3,
+                new_content: vec![4, 5],
+            }]),
+        });
+        let updated_file_history = file_history.encode().unwrap();
+
+        fs_mock.set_state(FsState::new(vec![
+            EntryMock::file("./changed_file", &[1, 2, 3, 4, 5]),
+            EntryMock::file("./unchanged_file", &[1, 2, 3]),
+
+            EntryMock::dir("./.ka"),
+            EntryMock::file("./.ka/index", &initial_index),
+            EntryMock::dir("./.ka/files"),
+            EntryMock::file("./.ka/files/changed_file", &initial_file_history),
+            EntryMock::file("./.ka/files/unchanged_file", &initial_file_history),
+        ]));
+
+        update(options, &fs_mock, now + 1).expect("Action failed.");
+
+        fs_mock.assert_match(FsState::new(vec![
+            EntryMock::file("./changed_file", &[1, 2, 3, 4, 5]),
+            EntryMock::file("./unchanged_file", &[1, 2, 3]),
+
+            EntryMock::dir("./.ka"),
+            EntryMock::file("./.ka/index", &updated_index),
+            EntryMock::dir("./.ka/files"),
+            EntryMock::file("./.ka/files/changed_file", &updated_file_history),
+            EntryMock::file("./.ka/files/unchanged_file", &initial_file_history),
+        ]))
+    }
+}

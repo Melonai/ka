@@ -150,6 +150,10 @@ pub mod mock {
             *state = new_state;
         }
 
+        pub fn get_state(&self) -> FsState {
+            self.state().clone()
+        }
+
         pub fn assert_match(&self, expected_state: FsState) {
             let diff = expected_state.diff(&self.state());
             if !diff.is_empty() {
@@ -349,6 +353,7 @@ pub mod mock {
         }
     }
 
+    #[derive(Clone)]
     pub struct FsState {
         entries: HashMap<PathBuf, EntryMock>,
     }
@@ -569,14 +574,14 @@ pub mod mock {
         }
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub struct FileMock {
         path: PathBuf,
         writable: bool,
         content: Vec<u8>,
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, Debug)]
     pub enum EntryMock {
         File(FileMock),
         Dir { path: PathBuf },
